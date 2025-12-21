@@ -10,7 +10,6 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Leaflet CSS (Fallback) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
@@ -33,9 +32,9 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "7.0.0 (Google API)";
+        const APP_VERSION = "7.0.1 (Fix Fallback)";
 
-        // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
+        // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -44,7 +43,7 @@
   messagingSenderId: "506964180846",
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
-        // ------------------------------------
+        // ------------------------------------------------------------------
 
         const Icons = {
             Users: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
@@ -88,57 +87,45 @@
             }
         }
 
-        // CARREGADOR DE SCRIPT GOOGLE
         const loadGoogleMapsScript = (apiKey) => {
             return new Promise((resolve, reject) => {
                 if (window.google && window.google.maps) return resolve();
                 if (document.querySelector('#google-maps-script')) return resolve();
-                
                 const script = document.createElement('script');
                 script.id = 'google-maps-script';
                 script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
-                script.async = true;
-                script.defer = true;
-                script.onload = resolve;
-                script.onerror = reject;
+                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
                 document.body.appendChild(script);
             });
         };
 
-        // --- COMPONENTE MAPA INTEGRADO (HÍBRIDO) ---
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
             const [scriptLoaded, setScriptLoaded] = React.useState(false);
             
-            // Carregar Script Google se houver chave
             React.useEffect(() => {
                 if (googleApiKey) {
                     loadGoogleMapsScript(googleApiKey).then(() => setScriptLoaded(true)).catch(console.error);
                 } else {
-                    setScriptLoaded(true); // Fallback to Leaflet immediately if no key
+                    setScriptLoaded(true);
                 }
             }, [googleApiKey]);
 
             React.useEffect(() => {
                 if (!scriptLoaded || !mapContainerRef.current) return;
                 
-                // Opção 1: Google Maps Nativo
                 if (googleApiKey && window.google) {
                     const startLat = churchLocation ? safeFloat(churchLocation.lat) : safeFloat(visits[0]?.lat);
                     const startLng = churchLocation ? safeFloat(churchLocation.lng) : safeFloat(visits[0]?.lng);
                     const map = new window.google.maps.Map(mapContainerRef.current, {
-                        center: { lat: startLat, lng: startLng },
-                        zoom: 13,
-                        disableDefaultUI: false
+                        center: { lat: startLat, lng: startLng }, zoom: 13, disableDefaultUI: false
                     });
 
-                    // Render Markers
                     const points = [];
                     if (churchLocation) points.push({ pos: churchLocation, title: "Igreja", color: "blue" });
                     visits.forEach((v, i) => { if(v.lat) points.push({ pos: v, title: `${i+1}. ${v.name}`, color: "green" }); });
                     if (pastorLocation) points.push({ pos: pastorLocation, title: "Pastor", color: "red" });
 
-                    // Directions Render
                     if (points.length > 1) {
                          const directionsService = new window.google.maps.DirectionsService();
                          const directionsRenderer = new window.google.maps.DirectionsRenderer({ map, suppressMarkers: false });
@@ -153,14 +140,11 @@
                          directionsService.route({
                              origin, destination, waypoints,
                              travelMode: window.google.maps.TravelMode.DRIVING
-                         }, (res, status) => {
-                             if (status === 'OK') directionsRenderer.setDirections(res);
-                         });
+                         }, (res, status) => { if (status === 'OK') directionsRenderer.setDirections(res); });
                     }
                     return;
                 }
 
-                // Opção 2: Leaflet (Fallback)
                 const center = churchLocation ? [churchLocation.lat, churchLocation.lng] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
                 const map = L.map(mapContainerRef.current).setView(center, 13);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
@@ -230,20 +214,105 @@
             return R * c;
         };
 
-        // --- CÁLCULO DE ROTA COM GOOGLE API (ORDENAÇÃO) ---
+        // --- RESTAURADO: FUNÇÃO DE FALLBACK PARA OFFLINE ---
+        const optimizeRoutesFallback = (visits, k, startPoint) => {
+            const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng));
+            const unmappable = visits.filter(v => !safeFloat(v.lat) || !safeFloat(v.lng));
+            if (validVisits.length === 0) return Array.from({ length: k }, () => []);
+
+            let centroids = [];
+            if (validVisits.length > 0) {
+                for (let i = 0; i < k; i++) centroids.push(validVisits[Math.floor((i / k) * validVisits.length)]);
+            }
+            
+            for (let iter = 0; iter < 10; iter++) {
+                const clusters = Array.from({ length: k }, () => []);
+                validVisits.forEach(visit => {
+                    let minDistance = Infinity;
+                    let clusterIndex = 0;
+                    centroids.forEach((c, idx) => {
+                        if (!c) return;
+                        const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(c.lat), safeFloat(c.lng));
+                        if (dist < minDistance) { minDistance = dist; clusterIndex = idx; }
+                    });
+                    clusters[clusterIndex].push(visit);
+                });
+                centroids = clusters.map((cluster, idx) => {
+                    if (cluster.length === 0) return centroids[idx]; 
+                    const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
+                    const sumLng = cluster.reduce((acc, v) => acc + safeFloat(v.lng), 0);
+                    return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
+                });
+            }
+
+            const baseSize = Math.floor(validVisits.length / k);
+            const remainder = validVisits.length % k;
+            const capacities = Array.from({ length: k }, (_, i) => baseSize + (i < remainder ? 1 : 0));
+            
+            let edges = [];
+            validVisits.forEach((visit, vIdx) => {
+                centroids.forEach((centroid, cIdx) => {
+                    const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(centroid.lat), safeFloat(centroid.lng));
+                    edges.push({ vIdx, cIdx, dist });
+                });
+            });
+
+            edges.sort((a, b) => a.dist - b.dist);
+
+            const assignedGroups = Array.from({ length: k }, () => []);
+            const assignedVisits = new Set();
+            const groupCounts = new Array(k).fill(0);
+
+            for (const edge of edges) {
+                if (assignedVisits.has(edge.vIdx)) continue;
+                if (groupCounts[edge.cIdx] >= capacities[edge.cIdx]) continue;
+                assignedGroups[edge.cIdx].push(validVisits[edge.vIdx]);
+                assignedVisits.add(edge.vIdx);
+                groupCounts[edge.cIdx]++;
+            }
+
+            const optimizedClusters = assignedGroups.map(cluster => {
+                if (cluster.length === 0) return [];
+                let sorted = [];
+                let remaining = [...cluster];
+                let currentLocation = startPoint ? { lat: safeFloat(startPoint.lat), lng: safeFloat(startPoint.lng) } : { lat: safeFloat(remaining[0].lat), lng: safeFloat(remaining[0].lng) };
+
+                while (remaining.length > 0) {
+                    let nearestIdx = -1;
+                    let nearestDist = Infinity;
+                    remaining.forEach((candidate, idx) => {
+                        const d = getDistance(currentLocation.lat, currentLocation.lng, safeFloat(candidate.lat), safeFloat(candidate.lng));
+                        if (d < nearestDist) { nearestDist = d; nearestIdx = idx; }
+                    });
+                    if (nearestIdx !== -1) {
+                        const nextVisit = remaining[nearestIdx];
+                        sorted.push(nextVisit);
+                        currentLocation = { lat: safeFloat(nextVisit.lat), lng: safeFloat(nextVisit.lng) };
+                        remaining.splice(nearestIdx, 1);
+                    } else break;
+                }
+                return sorted;
+            });
+            if (unmappable.length > 0) {
+                let currentGroup = 0;
+                unmappable.forEach(v => {
+                    optimizedClusters[currentGroup].push(v);
+                    currentGroup = (currentGroup + 1) % k;
+                });
+            }
+            return optimizedClusters;
+        };
+
         const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
-            // Se não tiver chave, fallback
             if (!apiKey) return optimizeRoutesFallback(visits, k, startPoint);
 
             await loadGoogleMapsScript(apiKey);
             const service = new window.google.maps.DirectionsService();
             const validVisits = visits.filter(v => safeFloat(v.lat));
             
-            // Divide em K grupos por proximidade simples primeiro (K-Means simples)
-            // ... (Reutiliza lógica K-Means para agrupar geograficamente primeiro)
+            // K-Means prévio para agrupar (mesma lógica do fallback)
             let centroids = [];
             for (let i = 0; i < k; i++) centroids.push(validVisits[Math.floor((i/k)*validVisits.length)]);
-            
             let clusters = Array.from({ length: k }, () => []);
             validVisits.forEach(v => {
                  let min = Infinity, idx = 0;
@@ -254,10 +323,10 @@
                  clusters[idx].push(v);
             });
 
-            // OTIMIZA CADA GRUPO COM A API DO GOOGLE
+            // OTIMIZA CADA GRUPO
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
-                if (cluster.length > 23) return cluster; // Google limit waypoints
+                if (cluster.length > 23) return cluster;
 
                 const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
                 const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
@@ -270,7 +339,7 @@
                 return new Promise((resolve) => {
                     service.route({
                         origin, destination, waypoints,
-                        optimizeWaypoints: true, // A MÁGICA ACONTECE AQUI
+                        optimizeWaypoints: true,
                         travelMode: window.google.maps.TravelMode.DRIVING
                     }, (result, status) => {
                         if (status === 'OK') {
@@ -278,22 +347,12 @@
                             const sortedCluster = newOrder.map(index => cluster[index]);
                             resolve(sortedCluster);
                         } else {
-                            console.error("Google Routing Failed", status);
                             resolve(cluster); // Fallback
                         }
                     });
                 });
             }));
-
             return optimizedClusters;
-        };
-
-        // Fallback antigo (K-Means + Greedy TSP)
-        const optimizeRoutesFallback = (visits, k, startPoint) => {
-            const validVisits = visits.filter(v => safeFloat(v.lat));
-            // ... (Mesma lógica da v6.0.0) ...
-            // Simplificado para brevidade, mas usa a lógica anterior
-            return [validVisits]; // Placeholder simples, idealmente copia a função anterior
         };
 
         // --- Helper Components ---
@@ -439,7 +498,20 @@
                     const list = querySnapshot.docs.map(d => ({id: d.id, ...d.data()}));
                     list.sort((a,b) => (a.orderIndex||999) - (b.orderIndex||999));
                     
-                    // Batch cleanup omitted for brevity, same as previous
+                    const batchCleanup = [];
+                    list.forEach(v => {
+                        if (v.assignedGroup && v.assignmentDate) {
+                            const assignDate = new Date(v.assignmentDate);
+                            if (now.getMonth() !== assignDate.getMonth() || now.getFullYear() !== assignDate.getFullYear()) {
+                                batchCleanup.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), {
+                                    assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null
+                                }));
+                                v.assignedTo = null; v.assignedGroup = null;
+                            }
+                        }
+                    });
+                    
+                    if (batchCleanup.length > 0) await Promise.all(batchCleanup);
 
                     const churchSnap = await getDoc(doc(db, 'artifacts', appId, 'settings', 'church_config'));
                     const churchData = churchSnap.exists() ? churchSnap.data() : null;
@@ -697,11 +769,16 @@
                     {showMap && <EmbeddedMap visits={mapData} churchLocation={churchLocation} pastorLocation={pastorLocation} onClose={() => setShowMap(false)} googleApiKey={googleApiKey} />}
                     
                     <header className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex justify-between items-center shadow-sm">
-                        <div>
+                        <div className="flex-1">
                             <h1 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Users /> Santa Ceia</h1>
-                            <p className="text-[10px] text-slate-400">{loading ? '...' : lastUpdated}</p>
+                            <div className="flex items-center justify-between mt-1">
+                                <p className="text-[10px] text-slate-400">{loading ? '...' : lastUpdated}</p>
+                                <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
+                                    {userData.name} ({userData.role === 'pastor' ? 'Pastor' : userData.role === 'presbitero' ? 'Presb.' : 'Diácono'})
+                                </span>
+                            </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 ml-2">
                             <button onClick={refreshData} className="p-2 bg-blue-100 text-blue-700 rounded-full shadow-sm border-2 border-blue-200"><Icons.CloudDownload /></button>
                             {isPastor && <button onClick={()=>setConfigModalOpen(true)} className="p-2 bg-slate-100 rounded-full"><Icons.Settings /></button>}
                             <button onClick={()=>{localStorage.clear(); signOut(auth); window.location.reload()}} className="p-2 bg-red-50 text-red-500 rounded-full"><Icons.LogOut /></button>
