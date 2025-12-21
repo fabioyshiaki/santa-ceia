@@ -32,7 +32,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "5.2.0 (Coords Visible)";
+        const APP_VERSION = "5.3.0 (Manual Config)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -85,7 +85,6 @@
             }
         }
 
-        // --- COMPONENTE MAPA INTEGRADO ---
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose }) => {
             const mapRef = React.useRef(null);
             
@@ -107,14 +106,12 @@
 
                     const latlngs = [];
 
-                    // Início: Igreja
                     if (churchLocation && churchLocation.lat) {
                         L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') })
                          .addTo(map).bindPopup("<b>Início: Igreja</b>");
                         latlngs.push([churchLocation.lat, churchLocation.lng]);
                     }
 
-                    // Visitas
                     visits.forEach((v, idx) => {
                         if (v.lat && v.lng) {
                             L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) })
@@ -123,7 +120,6 @@
                         }
                     });
 
-                    // Fim: Casa Pastor
                     if (pastorLocation && pastorLocation.lat) {
                         L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') })
                          .addTo(map).bindPopup("<b>Fim: Casa do Pastor</b>");
@@ -322,7 +318,6 @@
             const [churchLocation, setChurchLocation] = React.useState(null);
             const [pastorLocation, setPastorLocation] = React.useState(null);
             const [lastUpdated, setLastUpdated] = React.useState(null);
-            const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             
             // Map State
             const [showMap, setShowMap] = React.useState(false);
@@ -341,6 +336,10 @@
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
+            
+            // Edit inputs for Settings
+            const [editChurchCoords, setEditChurchCoords] = React.useState('');
+            const [editPastorCoords, setEditPastorCoords] = React.useState('');
 
             // 1. Auth Init
             React.useEffect(() => {
@@ -500,29 +499,38 @@
                 }, () => alert("Erro GPS"));
             };
 
-            const resolveLink = async (url) => {
-                if (url.includes("goo.gl") || url.includes("maps.app.goo.gl")) {
+            // Improved Link/Coords Resolver
+            const resolveInputToCoords = async (input) => {
+                // Case 1: Raw Coordinates (e.g., "-23.5, -46.6")
+                const rawMatch = input.match(/(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
+                if (rawMatch) return { lat: rawMatch[1], lng: rawMatch[2] };
+
+                // Case 2: Short Links (try to resolve or warn)
+                if (input.includes("goo.gl") || input.includes("maps.app.goo.gl")) {
                     try {
-                        const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
+                        const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(input)}`);
                         const data = await response.json();
                         let match = data.contents.match(/center=(-?\d+\.\d+)%2C(-?\d+\.\d+)/) || 
                                     data.contents.match(/\/@(-?\d+\.\d+),(-?\d+\.\d+)/);
                         return match ? { lat: match[1], lng: match[2] } : null;
                     } catch(e) { return null; }
                 }
-                let match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+
+                // Case 3: Long Links
+                let match = input.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || input.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
                 return match ? { lat: match[1], lng: match[2] } : null;
             };
 
             const handleLinkGPS = async (id) => {
-                const url = prompt("Link do Google Maps:");
-                if(!url) return;
-                setIsProcessingLink(true);
-                const coords = await resolveLink(url);
-                setIsProcessingLink(false);
+                const input = prompt("Cole o Link ou as Coordenadas (ex: -23.5, -46.6):");
+                if(!input) return;
+                
+                const coords = await resolveInputToCoords(input);
                 if (coords) {
                     await saveCoords(id, coords.lat, coords.lng);
-                } else alert("Não consegui ler o link. Tente o link completo.");
+                } else {
+                    alert("Não consegui ler. Tente colar as coordenadas diretamente (ex: -23.123, -46.123).");
+                }
             };
 
             const saveCoords = async (id, lat, lng) => {
@@ -533,33 +541,19 @@
                 refreshData();
             };
 
-            // Salva Igreja por Link ou GPS
-            const saveLocationConfig = async (type) => {
-                const isChurch = type === 'church';
-                const collectionName = isChurch ? 'church_config' : 'pastor_config';
-                
-                if (confirm("Usar GPS atual? (Cancelar para usar Link)")) {
-                    navigator.geolocation.getCurrentPosition(async p => {
-                        const data = { lat: p.coords.latitude, lng: p.coords.longitude };
-                        await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data);
-                        if (isChurch) setChurchLocation(data); else setPastorLocation(data);
-                        alert("Local salvo!");
-                        refreshData();
-                    });
+            // Saves Config from Text Input
+            const saveConfigFromInput = async (type, input) => {
+                if (!input) return;
+                const coords = await resolveInputToCoords(input);
+                if (coords) {
+                    const collectionName = type === 'church' ? 'church_config' : 'pastor_config';
+                    const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) };
+                    await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data);
+                    
+                    if (type === 'church') setChurchLocation(data); else setPastorLocation(data);
+                    alert("Configuração salva!");
                 } else {
-                    const url = prompt("Cole o Link do Google Maps:");
-                    if (url) {
-                        setIsProcessingLink(true);
-                        const coords = await resolveLink(url);
-                        setIsProcessingLink(false);
-                        if (coords) {
-                            const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) };
-                            await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data);
-                            if (isChurch) setChurchLocation(data); else setPastorLocation(data);
-                            alert("Local salvo pelo Link!");
-                            refreshData();
-                        } else alert("Link inválido.");
-                    }
+                    alert("Formato inválido. Tente colar 'Latitude, Longitude' numéricos.");
                 }
             };
 
@@ -936,23 +930,47 @@
                                 <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Settings/> Configurações de Rota</h3>
                                 
                                 <div className="space-y-4">
+                                    {/* IGREJA */}
                                     <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                                         <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Local de Início (Igreja)</label>
+                                        <div className="text-sm truncate text-slate-700 mb-2 font-mono">
+                                            {churchLocation ? `${safeFloat(churchLocation.lat).toFixed(5)}, ${safeFloat(churchLocation.lng).toFixed(5)}` : 'Não definido'}
+                                        </div>
                                         <div className="flex gap-2">
-                                            <div className="text-sm truncate flex-1 text-slate-700">
-                                                {churchLocation ? `📍 ${safeFloat(churchLocation.lat).toFixed(5)}, ${safeFloat(churchLocation.lng).toFixed(5)}` : 'Não definido'}
-                                            </div>
-                                            <button onClick={() => saveLocationConfig('church')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">Colar Link</button>
+                                            <input 
+                                                className="flex-1 text-xs p-2 border rounded" 
+                                                placeholder="Cole Link ou Coord..." 
+                                                value={editChurchCoords}
+                                                onChange={e => setEditChurchCoords(e.target.value)}
+                                            />
+                                            <button 
+                                                onClick={() => {saveConfigFromInput('church', editChurchCoords); setEditChurchCoords('')}}
+                                                className="bg-blue-600 text-white text-xs px-3 rounded font-bold"
+                                            >
+                                                Salvar
+                                            </button>
                                         </div>
                                     </div>
 
+                                    {/* PASTOR */}
                                     <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                                         <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Local de Fim (Casa do Pastor)</label>
+                                        <div className="text-sm truncate text-slate-700 mb-2 font-mono">
+                                            {pastorLocation ? `${safeFloat(pastorLocation.lat).toFixed(5)}, ${safeFloat(pastorLocation.lng).toFixed(5)}` : 'Não definido'}
+                                        </div>
                                         <div className="flex gap-2">
-                                            <div className="text-sm truncate flex-1 text-slate-700">
-                                                {pastorLocation ? `📍 ${safeFloat(pastorLocation.lat).toFixed(5)}, ${safeFloat(pastorLocation.lng).toFixed(5)}` : 'Não definido'}
-                                            </div>
-                                            <button onClick={() => saveLocationConfig('pastor')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">Colar Link</button>
+                                            <input 
+                                                className="flex-1 text-xs p-2 border rounded" 
+                                                placeholder="Cole Link ou Coord..." 
+                                                value={editPastorCoords}
+                                                onChange={e => setEditPastorCoords(e.target.value)}
+                                            />
+                                            <button 
+                                                onClick={() => {saveConfigFromInput('pastor', editPastorCoords); setEditPastorCoords('')}}
+                                                className="bg-blue-600 text-white text-xs px-3 rounded font-bold"
+                                            >
+                                                Salvar
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
