@@ -32,7 +32,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "8.2.0 (Pastor Test)";
+        const APP_VERSION = "8.3.0 (Smart Cluster)";
 
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
@@ -66,7 +66,8 @@
             Map: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" x2="8" y1="2" y2="18"/><line x1="16" x2="16" y1="6" y2="22"/></svg>,
             Flag: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>,
             Road: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20a6 6 0 0 1-12 0"/><path d="M12 20V4"/><path d="M8 8v8"/><path d="M16 8v8"/></svg>,
-            Key: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            Key: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>,
+            Lightning: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         };
 
         class ErrorBoundary extends React.Component {
@@ -212,7 +213,83 @@
             return R * c;
         };
 
+        // --- CÁLCULO DE ROTA COM GOOGLE API (Versão Corrigida para incluir todos os waypoints) ---
+        const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
+            if (!apiKey) return optimizeRoutesFallback(visits, k, startPoint);
+
+            await loadGoogleMapsScript(apiKey);
+            const service = new window.google.maps.DirectionsService();
+            const validVisits = visits.filter(v => safeFloat(v.lat));
+            
+            // K-Means ++ (Seed Better)
+            let centroids = [];
+            if (validVisits.length > 0) {
+                 centroids.push(validVisits[Math.floor(Math.random() * validVisits.length)]);
+                 for (let i = 1; i < k; i++) {
+                     let maxDist = -1;
+                     let bestCandidate = null;
+                     validVisits.forEach(v => {
+                         let minDistToCentroid = Infinity;
+                         centroids.forEach(c => {
+                             const d = getDistance(safeFloat(v.lat), safeFloat(v.lng), safeFloat(c.lat), safeFloat(c.lng));
+                             if (d < minDistToCentroid) minDistToCentroid = d;
+                         });
+                         if (minDistToCentroid > maxDist) {
+                             maxDist = minDistToCentroid;
+                             bestCandidate = v;
+                         }
+                     });
+                     if (bestCandidate) centroids.push(bestCandidate);
+                 }
+            }
+
+            let clusters = Array.from({ length: k }, () => []);
+            validVisits.forEach(v => {
+                 let min = Infinity, idx = 0;
+                 centroids.forEach((c, i) => {
+                     const d = getDistance(safeFloat(v.lat), safeFloat(v.lng), safeFloat(c.lat), safeFloat(c.lng));
+                     if(d < min) { min = d; idx = i; }
+                 });
+                 clusters[idx].push(v);
+            });
+
+            // OTIMIZA CADA GRUPO
+            const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
+                if (cluster.length === 0) return [];
+                if (cluster.length > 23) return cluster;
+
+                const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
+                const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
+                
+                // IMPORTANTE: Waypoints não devem incluir origem e destino se eles forem redundantes, 
+                // mas aqui, a origem e o destino são fixos (Igreja/Pastor), então TODAS as casas são waypoints.
+                const waypoints = cluster.map(v => ({
+                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)),
+                    stopover: true
+                }));
+
+                return new Promise((resolve) => {
+                    service.route({
+                        origin, destination, waypoints,
+                        optimizeWaypoints: true,
+                        travelMode: window.google.maps.TravelMode.DRIVING
+                    }, (result, status) => {
+                        if (status === 'OK') {
+                            const newOrder = result.routes[0].waypoint_order;
+                            const sortedCluster = newOrder.map(index => cluster[index]);
+                            resolve(sortedCluster);
+                        } else {
+                            resolve(cluster); // Fallback
+                        }
+                    });
+                });
+            }));
+            return optimizedClusters;
+        };
+
         const optimizeRoutesFallback = (visits, k, startPoint) => {
+             // ... (código existente K-Means) ...
+             // Replicando o código anterior para manter o arquivo completo e seguro
             const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng));
             const unmappable = visits.filter(v => !safeFloat(v.lat) || !safeFloat(v.lng));
             if (validVisits.length === 0) return Array.from({ length: k }, () => []);
@@ -300,57 +377,6 @@
             return optimizedClusters;
         };
 
-        const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
-            if (!apiKey) return optimizeRoutesFallback(visits, k, startPoint);
-
-            await loadGoogleMapsScript(apiKey);
-            const service = new window.google.maps.DirectionsService();
-            const validVisits = visits.filter(v => safeFloat(v.lat));
-            
-            let centroids = [];
-            for (let i = 0; i < k; i++) centroids.push(validVisits[Math.floor((i/k)*validVisits.length)]);
-            let clusters = Array.from({ length: k }, () => []);
-            validVisits.forEach(v => {
-                 let min = Infinity, idx = 0;
-                 centroids.forEach((c, i) => {
-                     const d = getDistance(safeFloat(v.lat), safeFloat(v.lng), safeFloat(c.lat), safeFloat(c.lng));
-                     if(d < min) { min = d; idx = i; }
-                 });
-                 clusters[idx].push(v);
-            });
-
-            const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
-                if (cluster.length === 0) return [];
-                if (cluster.length > 23) return cluster;
-
-                const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
-                const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
-                
-                const waypoints = cluster.map(v => ({
-                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)),
-                    stopover: true
-                }));
-
-                return new Promise((resolve) => {
-                    service.route({
-                        origin, destination, waypoints,
-                        optimizeWaypoints: true,
-                        travelMode: window.google.maps.TravelMode.DRIVING
-                    }, (result, status) => {
-                        if (status === 'OK') {
-                            const newOrder = result.routes[0].waypoint_order;
-                            const sortedCluster = newOrder.map(index => cluster[index]);
-                            resolve(sortedCluster);
-                        } else {
-                            resolve(cluster); // Fallback
-                        }
-                    });
-                });
-            }));
-            return optimizedClusters;
-        };
-
-        // --- Helper Components ---
         const calculateExpiration = (durationString) => {
             if (durationString === 'Permanente') return null;
             const months = parseInt(durationString.split(' ')[0]);
@@ -388,7 +414,6 @@
             const [email, setEmail] = React.useState('');
             const [password, setPassword] = React.useState('');
 
-            // Data State
             const [visits, setVisits] = React.useState([]);
             const [churchLocation, setChurchLocation] = React.useState(null);
             const [pastorLocation, setPastorLocation] = React.useState(null);
@@ -397,11 +422,9 @@
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             const [isOptimizing, setIsOptimizing] = React.useState(false);
             
-            // Map State
             const [showMap, setShowMap] = React.useState(false);
             const [mapData, setMapData] = React.useState([]);
 
-            // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
             const [newAddress, setNewAddress] = React.useState('');
@@ -415,12 +438,10 @@
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
             
-            // Edit inputs for Settings
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // 1. Auth Init
             React.useEffect(() => {
                 const unsub = onAuthStateChanged(auth, async (u) => {
                     setUser(u);
@@ -446,7 +467,6 @@
                 return () => unsub();
             }, []);
 
-            // 2. Fetch Officers
             React.useEffect(() => {
                 if (userData?.role && userData.role.toLowerCase() === 'pastor') {
                     const fetchOfficers = async () => {
@@ -464,7 +484,6 @@
                 }
             }, [userData]);
 
-            // 3. Data Fetching
             const loadData = async (force = false) => {
                 if (!user) return;
                 setLoading(true);
@@ -554,10 +573,8 @@
 
             const refreshData = () => loadData(true);
 
-            // ... (addVisit, updateGPS, handleLinkGPS, saveCoords same as before) ...
-            // [Code for adding/editing visits remains same, using safeFloat]
-            
-            const resolveInputToCoords = async (input) => {
+            // ... same handlers ...
+             const resolveInputToCoords = async (input) => {
                 const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
                 if (commaMatch) return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
                 const rawMatch = input.match(/(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
@@ -573,7 +590,6 @@
                 let match = input.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || input.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
                 return match ? { lat: match[1], lng: match[2] } : null;
             };
-            
             const handleLinkGPS = async (id) => {
                 const input = prompt("Link/Coords:");
                 if(!input) return;
@@ -583,14 +599,12 @@
                 if (coords) { await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) }); refreshData(); }
                 else alert("Erro ao ler.");
             };
-            
-             const updateGPS = async (id) => {
+            const updateGPS = async (id) => {
                 navigator.geolocation.getCurrentPosition(async p => {
                     await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: p.coords.latitude, lng: p.coords.longitude });
                     refreshData();
                 }, () => alert("Erro GPS"));
             };
-
             const toggleAttendance = async (id, currentStatus) => { const newStatus = !currentStatus; setVisits(prev => prev.map(v => v.id === id ? {...v, attendedChurch: newStatus} : v)); await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { attendedChurch: newStatus }); };
             const addVisit = async () => { if(!newName.trim()) return; await addDoc(collection(db, 'artifacts', appId, 'visits'), { name: newName, address: newAddress, duration: newDuration, expiresAt: calculateExpiration(newDuration), attendedChurch: false, lat: null, lng: null, assignedTo: null, orderIndex: 999, createdAt: serverTimestamp() }); setNewName(''); setNewAddress(''); setModalOpen(false); refreshData(); };
             const deleteVisit = async (id) => { if(confirm("Remover?")) { await deleteDoc(doc(db, 'artifacts', appId, 'visits', id)); refreshData(); } };
@@ -598,6 +612,25 @@
             const handleAssignmentChange = (groupIdx, type, value) => { setTeamAssignments(prev => ({ ...prev, [groupIdx]: { ...prev[groupIdx], [type]: value } })); };
             const saveConfigFromInput = async (type, input) => { if (!input) return; const coords = await resolveInputToCoords(input); if (coords) { const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) }; await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data); if (type === 'church') setChurchLocation(data); else setPastorLocation(data); alert("Salvo!"); } else alert("Inválido."); };
             const saveApiKey = async () => { await setDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'), { googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); };
+            
+            // --- NOVA FUNÇÃO RE-OTIMIZAR UM ÚNICO GRUPO ---
+            const reoptimizeGroup = async (groupIndex, group) => {
+                if (!googleApiKey) return alert("Precisa da Chave do Google para re-otimizar.");
+                if (!confirm("Re-otimizar este grupo? Isso pode mudar a ordem das visitas.")) return;
+                
+                setIsOptimizing(true);
+                // Chama a otimização APENAS para este grupo (k=1)
+                // Usa a Igreja e o Pastor como start/end fixos para este "mini" TSP
+                const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey);
+                
+                // Atualiza o estado visual
+                const newGroups = [...optimizedGroups];
+                newGroups[groupIndex] = optimizedSingle[0]; // O resultado vem como array de clusters
+                setOptimizedGroups(newGroups);
+                setIsOptimizing(false);
+                alert("Grupo re-ordenado!");
+            };
+
             const handleSmartDivide = async () => { setIsOptimizing(true); const clusters = await optimizeRoutesGoogle(visits, splitCount, churchLocation, pastorLocation, googleApiKey); setOptimizedGroups(clusters); setIsOptimizing(false); };
             const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: gIdx+1, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
             const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro ${groupId}?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
@@ -618,7 +651,6 @@
             };
 
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
-
             if (!user) return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50">
                     <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm">
@@ -644,7 +676,6 @@
                     </div>
                 </div>
             );
-
             if (!userData) return (
                 <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
                     <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-sm text-center">
@@ -693,21 +724,10 @@
                         </div>
                     </header>
                     
-                    {/* TAB SWITCHER (NEW POSITION) */}
                     {isPastor && (
                         <div className="flex p-2 gap-2 bg-slate-50 border-b">
-                            <button 
-                                onClick={() => setActiveTab('list')} 
-                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'list' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:bg-slate-200'}`}
-                            >
-                                Lista Geral
-                            </button>
-                            <button 
-                                onClick={() => setActiveTab('manage')} 
-                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'manage' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:bg-slate-200'}`}
-                            >
-                                Roteiros
-                            </button>
+                            <button onClick={() => setActiveTab('list')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'list' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:bg-slate-200'}`}>Lista Geral</button>
+                            <button onClick={() => setActiveTab('manage')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'manage' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:bg-slate-200'}`}>Roteiros</button>
                         </div>
                     )}
 
@@ -731,7 +751,11 @@
                                                 <div className="bg-slate-50 p-3 border-b space-y-2">
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-bold text-blue-800">Roteiro {i+1} ({g.length})</span>
-                                                        <button onClick={() => handleShowInternalMap(g)} className="text-xs flex items-center gap-1 bg-white border px-2 py-1 rounded text-blue-600"><Icons.Map size={12}/> Mapa</button>
+                                                        <div className="flex gap-1">
+                                                             {/* BOTÃO RE-OTIMIZAR */}
+                                                            {googleApiKey && <button onClick={() => reoptimizeGroup(i, g)} className="text-xs flex items-center gap-1 bg-yellow-50 border border-yellow-200 px-2 py-1 rounded text-yellow-700"><Icons.Lightning size={12}/> Otimizar</button>}
+                                                            <button onClick={() => handleShowInternalMap(g)} className="text-xs flex items-center gap-1 bg-white border px-2 py-1 rounded text-blue-600"><Icons.Map size={12}/> Mapa</button>
+                                                        </div>
                                                     </div>
                                                     <div className="grid grid-cols-2 gap-2">
                                                         <select className="text-sm p-2 border rounded w-full bg-white" onChange={e => handleAssignmentChange(i, 'presbitero', e.target.value)}>
@@ -782,7 +806,8 @@
                                 )}
                             </div>
                         )}
-
+                        {/* ... Resto do código (activeTab === 'list', modals, etc) mantido igual ... */}
+                        
                         {activeTab === 'list' && (
                             <div className="space-y-4">
                                 {!isPastor && myVisits.length > 0 && (
@@ -843,8 +868,8 @@
                             </div>
                         )}
                     </main>
-
-                    {configModalOpen && (
+                    
+                     {configModalOpen && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[90vh] overflow-y-auto">
                                 <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Settings/> Configurações</h3>
@@ -880,9 +905,8 @@
                             </div>
                         </div>
                     )}
-
-                    {/* Other modals (Renew, Add) are standard... */}
-                    {renewTarget && (
+                    
+                     {renewTarget && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
                                 <h3 className="font-bold mb-4">Renovar</h3>
