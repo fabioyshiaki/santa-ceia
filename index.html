@@ -33,7 +33,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "4.1.0 (Rota Fixa)";
+        const APP_VERSION = "4.2.0 (Rota Fix v2)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -532,6 +532,7 @@
                 refreshData();
             };
 
+            // NOVA FUNÇÃO openMaps V4.1.0 - Estilo /dir/
             const openMaps = (groupVisits) => {
                 const pending = groupVisits.filter(v => !v.attendedChurch);
                 
@@ -546,31 +547,36 @@
                 // Sorting
                 const sorted = [...validPoints].sort((a,b) => (a.orderIndex||0)-(b.orderIndex||0));
 
-                // CORREÇÃO DA ROTA: Usar api=1&destination=...
-                // O último ponto é o destino final
-                const lastPoint = sorted[sorted.length - 1];
-                const destination = `${safeFloat(lastPoint.lat)},${safeFloat(lastPoint.lng)}`;
+                // Função auxiliar para lançar o mapa com as coordenadas formatadas
+                const launchMaps = (startLat, startLng) => {
+                    const coordsList = [];
+                    
+                    // 1. Adiciona Ponto de Partida (Igreja ou Atual)
+                    if (startLat && startLng) {
+                        coordsList.push(`${safeFloat(startLat)},${safeFloat(startLng)}`);
+                    }
+                    
+                    // 2. Adiciona todas as casas na ordem
+                    sorted.forEach(v => {
+                        coordsList.push(`${safeFloat(v.lat)},${safeFloat(v.lng)}`);
+                    });
 
-                // Waypoints são todos menos o último
-                // A origem ou é a Igreja ou a localização atual (deixada em branco na API)
-                const waypointsList = sorted.slice(0, sorted.length - 1);
-                const waypoints = waypointsList.map(v => `${safeFloat(v.lat)},${safeFloat(v.lng)}`).join('|');
+                    // Formato: https://www.google.com/maps/dir/lat,lng/lat,lng/lat,lng
+                    const url = `https://www.google.com/maps/dir/${coordsList.join('/')}`;
+                    window.open(url, '_blank');
+                };
 
-                let url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
-
-                // Se tiver igreja, define como origem
-                if (churchLocation && churchLocation.lat) {
-                    const cLat = safeFloat(churchLocation.lat);
-                    const cLng = safeFloat(churchLocation.lng);
-                    url += `&origin=${cLat},${cLng}`;
+                if (churchLocation && safeFloat(churchLocation.lat)) {
+                    // Começa da igreja
+                    launchMaps(churchLocation.lat, churchLocation.lng);
+                } else {
+                    // Se não tiver base, tenta pegar GPS atual para começar
+                    // Isso é importante para o mapa calcular a primeira rota
+                    navigator.geolocation.getCurrentPosition(
+                        (p) => launchMaps(p.coords.latitude, p.coords.longitude),
+                        () => launchMaps(null, null) // Se falhar ou negar, vai sem origem fixa (mapa decide)
+                    );
                 }
-                // Se não tiver igreja, não põe origin, e o Google Maps usa "Minha Localização"
-
-                if (waypoints.length > 0) {
-                    url += `&waypoints=${waypoints}`;
-                }
-
-                window.open(url, '_blank');
             };
             
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
