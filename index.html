@@ -32,7 +32,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "5.3.1 (Fix Variable)";
+        const APP_VERSION = "5.3.2 (Comma Fix)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -502,6 +502,15 @@
 
             // Improved Link/Coords Resolver
             const resolveInputToCoords = async (input) => {
+                // Case 0: Coordinates with commas (e.g., "-6,7577201, -35,6519698")
+                const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
+                if (commaMatch) {
+                     return { 
+                         lat: commaMatch[1].replace(',', '.'), 
+                         lng: commaMatch[2].replace(',', '.') 
+                     };
+                }
+
                 // Case 1: Raw Coordinates (e.g., "-23.5, -46.6")
                 const rawMatch = input.match(/(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
                 if (rawMatch) return { lat: rawMatch[1], lng: rawMatch[2] };
