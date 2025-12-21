@@ -32,7 +32,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "5.1.0 (Fixed Start/End)";
+        const APP_VERSION = "5.2.0 (Coords Visible)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -118,7 +118,7 @@
                     visits.forEach((v, idx) => {
                         if (v.lat && v.lng) {
                             L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) })
-                             .addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`);
+                             .addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b><br>${v.address}<br><small>${v.lat}, ${v.lng}</small>`);
                             latlngs.push([v.lat, v.lng]);
                         }
                     });
@@ -879,6 +879,11 @@
                                                                 {v.name}
                                                                 {isChecked && <Icons.CheckCircle size={16} />}
                                                             </h3>
+                                                            {v.lat && v.lng && (
+                                                                <p className="text-[10px] text-slate-400 font-mono mb-1">
+                                                                    {safeFloat(v.lat).toFixed(5)}, {safeFloat(v.lng).toFixed(5)}
+                                                                </p>
+                                                            )}
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
                                                         {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
@@ -935,7 +940,7 @@
                                         <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Local de Início (Igreja)</label>
                                         <div className="flex gap-2">
                                             <div className="text-sm truncate flex-1 text-slate-700">
-                                                {churchLocation ? `📍 ${churchLocation.lat}, ${churchLocation.lng}` : 'Não definido'}
+                                                {churchLocation ? `📍 ${safeFloat(churchLocation.lat).toFixed(5)}, ${safeFloat(churchLocation.lng).toFixed(5)}` : 'Não definido'}
                                             </div>
                                             <button onClick={() => saveLocationConfig('church')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">Colar Link</button>
                                         </div>
@@ -945,7 +950,7 @@
                                         <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Local de Fim (Casa do Pastor)</label>
                                         <div className="flex gap-2">
                                             <div className="text-sm truncate flex-1 text-slate-700">
-                                                {pastorLocation ? `📍 ${pastorLocation.lat}, ${pastorLocation.lng}` : 'Não definido'}
+                                                {pastorLocation ? `📍 ${safeFloat(pastorLocation.lat).toFixed(5)}, ${safeFloat(pastorLocation.lng).toFixed(5)}` : 'Não definido'}
                                             </div>
                                             <button onClick={() => saveLocationConfig('pastor')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">Colar Link</button>
                                         </div>
