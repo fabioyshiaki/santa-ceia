@@ -32,7 +32,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "7.0.1 (Fix Fallback)";
+        const APP_VERSION = "8.0.0 (Role & Route Fix)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -214,7 +214,6 @@
             return R * c;
         };
 
-        // --- RESTAURADO: FUNÇÃO DE FALLBACK PARA OFFLINE ---
         const optimizeRoutesFallback = (visits, k, startPoint) => {
             const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng));
             const unmappable = visits.filter(v => !safeFloat(v.lat) || !safeFloat(v.lng));
@@ -310,7 +309,6 @@
             const service = new window.google.maps.DirectionsService();
             const validVisits = visits.filter(v => safeFloat(v.lat));
             
-            // K-Means prévio para agrupar (mesma lógica do fallback)
             let centroids = [];
             for (let i = 0; i < k; i++) centroids.push(validVisits[Math.floor((i/k)*validVisits.length)]);
             let clusters = Array.from({ length: k }, () => []);
@@ -323,7 +321,6 @@
                  clusters[idx].push(v);
             });
 
-            // OTIMIZA CADA GRUPO
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
                 if (cluster.length > 23) return cluster;
@@ -355,7 +352,6 @@
             return optimizedClusters;
         };
 
-        // --- Helper Components ---
         const calculateExpiration = (durationString) => {
             if (durationString === 'Permanente') return null;
             const months = parseInt(durationString.split(' ')[0]);
@@ -393,7 +389,6 @@
             const [email, setEmail] = React.useState('');
             const [password, setPassword] = React.useState('');
 
-            // Data State
             const [visits, setVisits] = React.useState([]);
             const [churchLocation, setChurchLocation] = React.useState(null);
             const [pastorLocation, setPastorLocation] = React.useState(null);
@@ -402,11 +397,9 @@
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             const [isOptimizing, setIsOptimizing] = React.useState(false);
             
-            // Map State
             const [showMap, setShowMap] = React.useState(false);
             const [mapData, setMapData] = React.useState([]);
 
-            // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
             const [newAddress, setNewAddress] = React.useState('');
@@ -420,12 +413,10 @@
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
             
-            // Edit inputs for Settings
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // 1. Auth Init
             React.useEffect(() => {
                 const unsub = onAuthStateChanged(auth, async (u) => {
                     setUser(u);
@@ -451,17 +442,16 @@
                 return () => unsub();
             }, []);
 
-            // 2. Fetch Officers
             React.useEffect(() => {
-                if (userData?.role === 'pastor') {
+                if (userData?.role && userData.role.toLowerCase() === 'pastor') {
                     const fetchOfficers = async () => {
                         try {
                             const q = query(collection(db, 'artifacts', appId, 'users'));
                             const snap = await getDocs(q);
                             const all = snap.docs.map(d => d.data());
                             setAvailableOfficers({
-                                presbiteros: all.filter(u => u.role === 'presbitero'),
-                                diaconos: all.filter(u => u.role === 'diacono')
+                                presbiteros: all.filter(u => u.role.toLowerCase() === 'presbitero'),
+                                diaconos: all.filter(u => u.role.toLowerCase() === 'diacono')
                             });
                         } catch (e) { console.error("Erro oficiais", e); }
                     };
@@ -469,7 +459,6 @@
                 }
             }, [userData]);
 
-            // 3. Data Fetching
             const loadData = async (force = false) => {
                 if (!user) return;
                 setLoading(true);
@@ -551,7 +540,7 @@
             const handleRegisterProfile = async (e) => {
                 e.preventDefault();
                 const fd = new FormData(e.target);
-                const data = { name: fd.get('name'), role: fd.get('role'), uid: user.uid };
+                const data = { name: fd.get('name'), role: fd.get('role').toLowerCase(), uid: user.uid };
                 await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), data);
                 localStorage.setItem(`profile_${user.uid}`, JSON.stringify(data));
                 setUserData(data);
@@ -559,14 +548,13 @@
 
             const refreshData = () => loadData(true);
 
-            // ... (addVisit, updateGPS, handleLinkGPS, saveCoords same as before) ...
-            // [Code for adding/editing visits remains same, using safeFloat]
+            // ... [Other functions: addVisit, updateGPS, resolveInputToCoords, handleLinkGPS, saveCoords, saveConfigFromInput, saveApiKey, deleteVisit, handleRenew, handleAssignmentChange, handleSmartDivide, saveRoutes, deleteRoute, handleShowInternalMap] - SAME AS V7.0.1 
+            // (Re-using from previous correct versions but with isPastor normalization)
             
-            const resolveInputToCoords = async (input) => {
+            // Re-adding essential functions to ensure completeness in this single block
+             const resolveInputToCoords = async (input) => {
                 const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
-                if (commaMatch) {
-                     return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
-                }
+                if (commaMatch) return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
                 const rawMatch = input.match(/(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
                 if (rawMatch) return { lat: rawMatch[1], lng: rawMatch[2] };
                 if (input.includes("goo.gl") || input.includes("maps.app.goo.gl")) {
@@ -580,119 +568,28 @@
                 let match = input.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || input.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
                 return match ? { lat: match[1], lng: match[2] } : null;
             };
-            
+
             const handleLinkGPS = async (id) => {
                 const input = prompt("Link/Coords:");
                 if(!input) return;
                 setIsProcessingLink(true);
                 const coords = await resolveInputToCoords(input);
                 setIsProcessingLink(false);
-                if (coords) {
-                    await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) });
-                    refreshData();
-                } else alert("Erro ao ler.");
+                if (coords) { await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) }); refreshData(); }
+                else alert("Erro ao ler.");
             };
-            
-             const updateGPS = async (id) => {
-                navigator.geolocation.getCurrentPosition(async p => {
-                    await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: p.coords.latitude, lng: p.coords.longitude });
-                    refreshData();
-                }, () => alert("Erro GPS"));
-            };
-
-            const toggleAttendance = async (id, currentStatus) => {
-                const newStatus = !currentStatus;
-                setVisits(prev => prev.map(v => v.id === id ? {...v, attendedChurch: newStatus} : v));
-                await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { attendedChurch: newStatus });
-            };
-            
-            const addVisit = async () => {
-                 if(!newName.trim()) return;
-                 await addDoc(collection(db, 'artifacts', appId, 'visits'), {
-                    name: newName, address: newAddress, duration: newDuration, 
-                    expiresAt: calculateExpiration(newDuration), attendedChurch: false,
-                    lat: null, lng: null, assignedTo: null, orderIndex: 999, createdAt: serverTimestamp()
-                });
-                setNewName(''); setNewAddress(''); setModalOpen(false); refreshData();
-            };
-            
-            const deleteVisit = async (id) => {
-                if(confirm("Remover?")) { await deleteDoc(doc(db, 'artifacts', appId, 'visits', id)); refreshData(); }
-            };
-
-            const handleRenew = async () => {
-                if (!renewTarget) return;
-                await updateDoc(doc(db, 'artifacts', appId, 'visits', renewTarget), {
-                    duration: renewDuration, expiresAt: calculateExpiration(renewDuration), attendedChurch: false
-                });
-                setRenewTarget(null); refreshData();
-            };
-
-            const handleAssignmentChange = (groupIdx, type, value) => {
-                setTeamAssignments(prev => ({ ...prev, [groupIdx]: { ...prev[groupIdx], [type]: value } }));
-            };
-
-            // Saves Config
-            const saveConfigFromInput = async (type, input) => {
-                if (!input) return;
-                const coords = await resolveInputToCoords(input);
-                if (coords) {
-                    const collectionName = type === 'church' ? 'church_config' : 'pastor_config';
-                    const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) };
-                    await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data);
-                    if (type === 'church') setChurchLocation(data); else setPastorLocation(data);
-                    alert("Salvo!");
-                } else alert("Inválido.");
-            };
-            
-            const saveApiKey = async () => {
-                await setDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'), { googleMaps: editApiKey });
-                setGoogleApiKey(editApiKey);
-                alert("Chave salva!");
-            };
-
-            const handleSmartDivide = async () => {
-                setIsOptimizing(true);
-                // USA A NOVA FUNÇÃO QUE CHAMA A API DO GOOGLE SE A CHAVE EXISTIR
-                const clusters = await optimizeRoutesGoogle(visits, splitCount, churchLocation, pastorLocation, googleApiKey);
-                setOptimizedGroups(clusters);
-                setIsOptimizing(false);
-            };
-
-            const saveRoutes = async () => {
-                const batch = [];
-                const nowISO = new Date().toISOString(); 
-                optimizedGroups.forEach((group, gIdx) => {
-                    const team = teamAssignments[gIdx] || {};
-                    const parts = [];
-                    if (team.presbitero) parts.push(team.presbitero);
-                    if (team.diacono) parts.push(team.diacono);
-                    const assignedTo = parts.join(' & ') || null;
-                    if(!assignedTo) return;
-                    group.forEach((v, idx) => {
-                        batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), {
-                            assignedTo: assignedTo, assignedGroup: gIdx+1, orderIndex: idx, assignmentDate: nowISO 
-                        }));
-                    });
-                });
-                if(batch.length === 0) return alert("Selecione os responsáveis.");
-                await Promise.all(batch);
-                setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData();
-            };
-            
-            const deleteRoute = async (groupId) => {
-                 if (!confirm(`Excluir Roteiro ${groupId}?`)) return;
-                 const toReset = visits.filter(v => v.assignedGroup === groupId);
-                 const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), {
-                    assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null
-                }));
-                await Promise.all(batch); refreshData();
-            };
-
-            const handleShowInternalMap = (groupVisits) => {
-                const toVisit = groupVisits.filter(v => !v.attendedChurch);
-                setMapData(toVisit); setShowMap(true);
-            };
+            const updateGPS = async (id) => { navigator.geolocation.getCurrentPosition(async p => { await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: p.coords.latitude, lng: p.coords.longitude }); refreshData(); }, () => alert("Erro GPS")); };
+            const toggleAttendance = async (id, currentStatus) => { const newStatus = !currentStatus; setVisits(prev => prev.map(v => v.id === id ? {...v, attendedChurch: newStatus} : v)); await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { attendedChurch: newStatus }); };
+            const addVisit = async () => { if(!newName.trim()) return; await addDoc(collection(db, 'artifacts', appId, 'visits'), { name: newName, address: newAddress, duration: newDuration, expiresAt: calculateExpiration(newDuration), attendedChurch: false, lat: null, lng: null, assignedTo: null, orderIndex: 999, createdAt: serverTimestamp() }); setNewName(''); setNewAddress(''); setModalOpen(false); refreshData(); };
+            const deleteVisit = async (id) => { if(confirm("Remover?")) { await deleteDoc(doc(db, 'artifacts', appId, 'visits', id)); refreshData(); } };
+            const handleRenew = async () => { if (!renewTarget) return; await updateDoc(doc(db, 'artifacts', appId, 'visits', renewTarget), { duration: renewDuration, expiresAt: calculateExpiration(renewDuration), attendedChurch: false }); setRenewTarget(null); refreshData(); };
+            const handleAssignmentChange = (groupIdx, type, value) => { setTeamAssignments(prev => ({ ...prev, [groupIdx]: { ...prev[groupIdx], [type]: value } })); };
+            const saveConfigFromInput = async (type, input) => { if (!input) return; const coords = await resolveInputToCoords(input); if (coords) { const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) }; await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data); if (type === 'church') setChurchLocation(data); else setPastorLocation(data); alert("Salvo!"); } else alert("Inválido."); };
+            const saveApiKey = async () => { await setDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'), { googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); };
+            const handleSmartDivide = async () => { setIsOptimizing(true); const clusters = await optimizeRoutesGoogle(visits, splitCount, churchLocation, pastorLocation, googleApiKey); setOptimizedGroups(clusters); setIsOptimizing(false); };
+            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: gIdx+1, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
+            const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro ${groupId}?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
+            const handleShowInternalMap = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); setMapData(toVisit); setShowMap(true); };
 
             const openMaps = (groupVisits) => {
                 const toVisit = groupVisits.filter(v => !v.attendedChurch);
@@ -710,8 +607,7 @@
 
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
 
-            // ... (Login and Profile screens same as before) ...
-             if (!user) return (
+            if (!user) return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50">
                     <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm">
                         <div className="flex justify-center mb-6 text-blue-700"><Icons.Users size={40} /></div>
@@ -752,7 +648,7 @@
                 </div>
             );
 
-            const isPastor = userData.role === 'pastor';
+            const isPastor = userData.role && userData.role.toLowerCase() === 'pastor';
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
             const activeGroups = {};
             if (isPastor) {
@@ -773,8 +669,8 @@
                             <h1 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Users /> Santa Ceia</h1>
                             <div className="flex items-center justify-between mt-1">
                                 <p className="text-[10px] text-slate-400">{loading ? '...' : lastUpdated}</p>
-                                <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
-                                    {userData.name} ({userData.role === 'pastor' ? 'Pastor' : userData.role === 'presbitero' ? 'Presb.' : 'Diácono'})
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isPastor ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>
+                                    {userData.name} {isPastor ? '[ADMIN]' : ''}
                                 </span>
                             </div>
                         </div>
