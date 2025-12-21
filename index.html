@@ -32,7 +32,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "5.3.0 (Manual Config)";
+        const APP_VERSION = "5.3.1 (Fix Variable)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -318,6 +318,7 @@
             const [churchLocation, setChurchLocation] = React.useState(null);
             const [pastorLocation, setPastorLocation] = React.useState(null);
             const [lastUpdated, setLastUpdated] = React.useState(null);
+            const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             
             // Map State
             const [showMap, setShowMap] = React.useState(false);
@@ -525,7 +526,10 @@
                 const input = prompt("Cole o Link ou as Coordenadas (ex: -23.5, -46.6):");
                 if(!input) return;
                 
+                setIsProcessingLink(true);
                 const coords = await resolveInputToCoords(input);
+                setIsProcessingLink(false);
+
                 if (coords) {
                     await saveCoords(id, coords.lat, coords.lng);
                 } else {
@@ -544,7 +548,10 @@
             // Saves Config from Text Input
             const saveConfigFromInput = async (type, input) => {
                 if (!input) return;
+                setIsProcessingLink(true);
                 const coords = await resolveInputToCoords(input);
+                setIsProcessingLink(false);
+
                 if (coords) {
                     const collectionName = type === 'church' ? 'church_config' : 'pastor_config';
                     const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) };
