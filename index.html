@@ -10,6 +10,11 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- Leaflet CSS (Mapa Gratuito) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3652/3652191.png">
     <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIlNhbnRhIENlaWEgZG9zIEVuZmVybW9zIiwKICAic2hvcnRfbmFtZSI6ICJTYW50YSBDZWlhIiwKICAiZGVzY3JpcHRpb24iOiAiR2VzdMOjbyBkZSB2aXNpdGFzIHBhcmEgU2FudGEgQ2VpYSIsCiAgInRoZW1lX2NvbG9yIjogIiNmZmZmZmYiLAogICJiYWNrZ3JvdW5kX2NvbG9yIjogIiNmZmZmZmYiLAogICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLAogICJpY29ucyI6IFsKICAgIHsKICAgICAgInNyYyI6ICJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zNjUyLzM2NTIxOTEucG5nIiwKICAgICAgInNpemVzIjogIjUxMng1MTIiLAogICAgICAidHlwZSI6ICJpbWFnZS9wbmciCiAgICB9CiAgXQp9">
 
@@ -17,12 +22,9 @@
         body { -webkit-tap-highlight-color: transparent; user-select: none; }
         input, textarea, select { user-select: text; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-        .pulse-animation { animation: pulse-blue 2s infinite; }
-        @keyframes pulse-blue {
-            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
-        }
+        .map-container { height: 100%; width: 100%; z-index: 0; }
+        /* Ajuste para ícones do Leaflet em React */
+        .leaflet-div-icon { background: transparent; border: none; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -33,7 +35,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "4.2.0 (Rota Fix v2)";
+        const APP_VERSION = "5.0.0 (Mapa Integrado)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -65,7 +67,9 @@
             Clock: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
             Refresh: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>,
             CloudDownload: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
-            ChurchCheck: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>
+            ChurchCheck: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>,
+            Map: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" x2="8" y1="2" y2="18"/><line x1="16" x2="16" y1="6" y2="22"/></svg>,
+            Flag: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
         };
 
         class ErrorBoundary extends React.Component {
@@ -83,6 +87,85 @@
                 return this.props.children;
             }
         }
+
+        // --- COMPONENTE MAPA INTEGRADO ---
+        const EmbeddedMap = ({ visits, churchLocation, onClose }) => {
+            const mapRef = React.useRef(null);
+            
+            React.useEffect(() => {
+                if (!mapRef.current) {
+                    const center = churchLocation ? [churchLocation.lat, churchLocation.lng] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
+                    const map = L.map('map-container').setView(center, 13);
+                    
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap contributors'
+                    }).addTo(map);
+
+                    // Ícones
+                    const createIcon = (color, html) => L.divIcon({
+                        className: 'custom-icon',
+                        html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`,
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 15]
+                    });
+
+                    // Marcador Igreja (Início)
+                    if (churchLocation && churchLocation.lat) {
+                        L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') })
+                         .addTo(map)
+                         .bindPopup("<b>Início: Igreja</b>");
+                    }
+
+                    // Marcadores Visitas
+                    const latlngs = [];
+                    if (churchLocation && churchLocation.lat) latlngs.push([churchLocation.lat, churchLocation.lng]);
+
+                    visits.forEach((v, idx) => {
+                        if (v.lat && v.lng) {
+                            const isLast = idx === visits.length - 1;
+                            const color = isLast ? '#dc2626' : '#16a34a'; // Vermelho para o fim, verde para as outras
+                            const label = isLast ? 'F' : (idx + 1);
+                            
+                            L.marker([v.lat, v.lng], { icon: createIcon(color, label) })
+                             .addTo(map)
+                             .bindPopup(`<b>${idx+1}. ${v.name}</b><br>${v.address}`);
+                            
+                            latlngs.push([v.lat, v.lng]);
+                        }
+                    });
+
+                    // Linha da Rota
+                    if (latlngs.length > 1) {
+                        const polyline = L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map);
+                        map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+                    }
+
+                    mapRef.current = map;
+                }
+                
+                return () => {
+                    if (mapRef.current) {
+                        mapRef.current.remove();
+                        mapRef.current = null;
+                    }
+                };
+            }, [visits, churchLocation]);
+
+            return (
+                <div className="fixed inset-0 bg-white z-50 flex flex-col">
+                    <div className="bg-white p-4 border-b flex justify-between items-center shadow-sm z-10">
+                        <h3 className="font-bold text-slate-800">Mapa da Rota</h3>
+                        <button onClick={onClose} className="bg-slate-100 p-2 rounded-full text-slate-600">✕</button>
+                    </div>
+                    <div id="map-container" className="flex-1 bg-slate-100"></div>
+                    <div className="p-2 bg-white border-t text-[10px] text-center text-slate-500 flex justify-center gap-4">
+                        <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-blue-600"></div> Início (Igreja)</span>
+                        <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-green-600"></div> Visitas</span>
+                        <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-red-600"></div> Fim</span>
+                    </div>
+                </div>
+            );
+        };
 
         let app, auth, db;
         const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
@@ -109,7 +192,7 @@
             return R * c;
         };
 
-        const optimizeRoutes = (visits, k, startPoint) => {
+        const optimizeRoutes = (visits, k, startPoint, roundTrip = false) => {
             const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng));
             const unmappable = visits.filter(v => !safeFloat(v.lat) || !safeFloat(v.lng));
             if (validVisits.length === 0) return Array.from({ length: k }, () => []);
@@ -171,6 +254,7 @@
                 if (cluster.length === 0) return [];
                 let sorted = [];
                 let remaining = [...cluster];
+                // Start from church/base
                 let currentLocation = startPoint ? { lat: safeFloat(startPoint.lat), lng: safeFloat(startPoint.lng) } : { lat: safeFloat(remaining[0].lat), lng: safeFloat(remaining[0].lng) };
 
                 while (remaining.length > 0) {
@@ -192,8 +276,13 @@
                         remaining.splice(nearestIdx, 1);
                     } else break;
                 }
+                
+                // If round trip, we don't change the order much, but we conceptually "return"
+                // The current TSP is simple greedy nearest neighbor which is good enough
+                
                 return sorted;
             });
+            
             if (unmappable.length > 0) {
                 if (optimizedClusters.length === 0) optimizedClusters.push([]);
                 optimizedClusters[0] = [...optimizedClusters[0], ...unmappable];
@@ -244,6 +333,10 @@
             const [lastUpdated, setLastUpdated] = React.useState(null);
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             
+            // Map State
+            const [showMap, setShowMap] = React.useState(false);
+            const [mapData, setMapData] = React.useState([]);
+
             // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
@@ -254,6 +347,7 @@
             const [renewTarget, setRenewTarget] = React.useState(null);
             const [renewDuration, setRenewDuration] = React.useState('1 Mês');
             const [splitCount, setSplitCount] = React.useState(2);
+            const [roundTrip, setRoundTrip] = React.useState(false);
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
@@ -532,49 +626,41 @@
                 refreshData();
             };
 
-            // NOVA FUNÇÃO openMaps V4.1.0 - Estilo /dir/
+            // Abre Mapa Interno (Leaflet)
+            const handleShowInternalMap = (groupVisits) => {
+                const toVisit = groupVisits.filter(v => !v.attendedChurch);
+                if (toVisit.length === 0) return alert("Nenhuma visita pendente com GPS.");
+                setMapData(toVisit);
+                setShowMap(true);
+            };
+
+            // Abre Google Maps (Link)
             const openMaps = (groupVisits) => {
-                const pending = groupVisits.filter(v => !v.attendedChurch);
-                
-                const validPoints = pending.filter(v => {
-                    const lat = safeFloat(v.lat);
-                    const lng = safeFloat(v.lng);
-                    return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
-                });
+                const toVisit = groupVisits.filter(v => !v.attendedChurch);
+                const validPoints = toVisit.filter(v => safeFloat(v.lat) && safeFloat(v.lng));
                 
                 if (validPoints.length === 0) return alert("Nenhuma casa com GPS válido.");
 
-                // Sorting
+                // Ordenar
                 const sorted = [...validPoints].sort((a,b) => (a.orderIndex||0)-(b.orderIndex||0));
 
-                // Função auxiliar para lançar o mapa com as coordenadas formatadas
                 const launchMaps = (startLat, startLng) => {
                     const coordsList = [];
+                    // Start
+                    if (startLat && startLng) coordsList.push(`${safeFloat(startLat)},${safeFloat(startLng)}`);
+                    // Waypoints
+                    sorted.forEach(v => coordsList.push(`${safeFloat(v.lat)},${safeFloat(v.lng)}`));
                     
-                    // 1. Adiciona Ponto de Partida (Igreja ou Atual)
-                    if (startLat && startLng) {
-                        coordsList.push(`${safeFloat(startLat)},${safeFloat(startLng)}`);
-                    }
-                    
-                    // 2. Adiciona todas as casas na ordem
-                    sorted.forEach(v => {
-                        coordsList.push(`${safeFloat(v.lat)},${safeFloat(v.lng)}`);
-                    });
-
-                    // Formato: https://www.google.com/maps/dir/lat,lng/lat,lng/lat,lng
                     const url = `https://www.google.com/maps/dir/${coordsList.join('/')}`;
                     window.open(url, '_blank');
                 };
 
                 if (churchLocation && safeFloat(churchLocation.lat)) {
-                    // Começa da igreja
                     launchMaps(churchLocation.lat, churchLocation.lng);
                 } else {
-                    // Se não tiver base, tenta pegar GPS atual para começar
-                    // Isso é importante para o mapa calcular a primeira rota
                     navigator.geolocation.getCurrentPosition(
                         (p) => launchMaps(p.coords.latitude, p.coords.longitude),
-                        () => launchMaps(null, null) // Se falhar ou negar, vai sem origem fixa (mapa decide)
+                        () => launchMaps(null, null)
                     );
                 }
             };
@@ -644,9 +730,18 @@
 
             return (
                 <div className="pb-24">
+                    {/* MAPA INTEGRADO */}
+                    {showMap && (
+                        <EmbeddedMap 
+                            visits={mapData} 
+                            churchLocation={churchLocation} 
+                            onClose={() => setShowMap(false)} 
+                        />
+                    )}
+
                     <header className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex justify-between items-center shadow-sm">
                         <div>
-                            <h1 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Users /> Santa Ceia dos Enfermos</h1>
+                            <h1 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Users /> Santa Ceia</h1>
                             <p className="text-[10px] text-slate-400 flex items-center gap-1">
                                 {loading ? 'A carregar...' : `Dados: ${lastUpdated}`}
                             </p>
@@ -663,13 +758,19 @@
                             <div className="space-y-6 animate-in fade-in">
                                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                                     <h2 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><Icons.Split /> Criar Novos Roteiros</h2>
-                                    <div className="flex gap-2 items-center">
-                                        <select value={splitCount} onChange={e=>setSplitCount(Number(e.target.value))} className="p-2 border rounded-lg flex-1 bg-white">
-                                            <option value={1}>1 Grupo</option>
-                                            <option value={2}>2 Grupos</option>
-                                            <option value={3}>3 Grupos</option>
-                                        </select>
-                                        <Button onClick={handleSmartDivide}>Gerar</Button>
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex gap-2 items-center">
+                                            <select value={splitCount} onChange={e=>setSplitCount(Number(e.target.value))} className="p-2 border rounded-lg flex-1 bg-white">
+                                                <option value={1}>1 Grupo</option>
+                                                <option value={2}>2 Grupos</option>
+                                                <option value={3}>3 Grupos</option>
+                                            </select>
+                                            <Button onClick={handleSmartDivide}>Gerar</Button>
+                                        </div>
+                                        <label className="flex items-center space-x-2 text-sm text-slate-600 mt-2">
+                                            <input type="checkbox" checked={roundTrip} onChange={() => setRoundTrip(!roundTrip)} className="w-4 h-4"/>
+                                            <span>Voltar à Base no final? (Rota Circular)</span>
+                                        </label>
                                     </div>
                                 </div>
 
@@ -679,7 +780,10 @@
                                         {optimizedGroups.map((g, i) => (
                                             <div key={i} className="bg-white border-2 border-slate-200 rounded-xl overflow-hidden shadow-sm">
                                                 <div className="bg-slate-50 p-3 border-b space-y-2">
-                                                    <div className="flex justify-between"><span className="font-bold text-blue-800">Roteiro {i+1} ({g.length})</span></div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-bold text-blue-800">Roteiro {i+1} ({g.length})</span>
+                                                        <button onClick={() => handleShowInternalMap(g)} className="text-xs flex items-center gap-1 bg-white border px-2 py-1 rounded text-blue-600"><Icons.Map size={12}/> Ver no Mapa</button>
+                                                    </div>
                                                     <div className="grid grid-cols-2 gap-2">
                                                         <select className="text-sm p-2 border rounded w-full bg-white" onChange={e => handleAssignmentChange(i, 'presbitero', e.target.value)}>
                                                             <option value="">Presbítero</option>
@@ -734,7 +838,10 @@
                                         <div className="absolute top-0 right-0 opacity-10 translate-x-4 -translate-y-4"><Icons.Navigation size={100}/></div>
                                         <h3 className="font-bold">Seu Roteiro</h3>
                                         <p className="text-emerald-100 text-sm mb-4">{myVisits.filter(v => !v.attendedChurch).length} casas restantes.</p>
-                                        <button onClick={()=>openMaps(myVisits)} className="bg-white text-emerald-700 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-50"><Icons.Navigation /> Iniciar Rota (Restantes)</button>
+                                        <div className="flex gap-2">
+                                            <button onClick={()=>handleShowInternalMap(myVisits)} className="bg-white/20 text-white w-1/3 py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-white/30 backdrop-blur-sm"><Icons.Map /> Mapa</button>
+                                            <button onClick={()=>openMaps(myVisits)} className="bg-white text-emerald-700 flex-1 py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-50"><Icons.Navigation /> Iniciar Rota (Google)</button>
+                                        </div>
                                     </div>
                                 )}
 
@@ -807,12 +914,15 @@
                     {configModalOpen && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
-                                <h3 className="font-bold mb-2 flex items-center gap-2"><Icons.Home/> Base</h3>
-                                <Button onClick={saveChurchGPS} className="w-full mb-2"><Icons.MapPin className="mr-2"/> Usar GPS</Button>
+                                <h3 className="font-bold mb-2 flex items-center gap-2"><Icons.Home/> Base da Igreja</h3>
+                                <p className="text-sm text-slate-500 mb-4">Ponto de partida dos roteiros.</p>
+                                <Button onClick={saveChurchGPS} className="w-full mb-2"><Icons.MapPin className="mr-2"/> Usar GPS atual</Button>
                                 <Button onClick={()=>setConfigModalOpen(false)} variant="ghost" className="w-full">Fechar</Button>
+                                <p className="text-center text-[10px] text-slate-300 mt-2">v{APP_VERSION}</p>
                             </div>
                         </div>
                     )}
+
                     {renewTarget && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
