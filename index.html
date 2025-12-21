@@ -27,9 +27,9 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, serverTimestamp, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "2.2.0 (Fix)";
+        const APP_VERSION = "2.3.0 (Database Fix)";
 
-        // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
+        // --- 🔴 CONFIGURAÇÃO DO FIREBASE (Coloque suas chaves aqui) ---
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -59,7 +59,7 @@
             Alert: () => <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
         };
 
-        // --- ERROR BOUNDARY (Captura o ecrã branco) ---
+        // --- ERROR BOUNDARY ---
         class ErrorBoundary extends React.Component {
             constructor(props) { super(props); this.state = { hasError: false, error: null }; }
             static getDerivedStateFromError(error) { return { hasError: true, error }; }
@@ -102,7 +102,6 @@
         };
 
         const optimizeRoutes = (visits, k, startPoint) => {
-            // ... (Mesma lógica de antes)
             const validVisits = visits.filter(v => v.lat && v.lng);
             const unmappable = visits.filter(v => !v.lat || !v.lng);
             if (validVisits.length === 0) return Array.from({ length: k }, () => []);
@@ -219,17 +218,18 @@
 
             React.useEffect(() => {
                 if (!user) return;
-                const q = query(collection(db, 'artifacts', appId, 'public', 'visits'));
+                // CORREÇÃO: Removido 'public' do caminho para ter 3 segmentos (ímpar)
+                const q = query(collection(db, 'artifacts', appId, 'visits'));
                 const unsub = onSnapshot(q, (snap) => {
                     const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
                     data.sort((a,b) => (a.orderIndex||999) - (b.orderIndex||999));
                     setVisits(data);
                 }, (error) => {
                     console.error("Erro Firestore:", error);
-                    // Não dar crash, apenas logar
                 });
                 
-                getDoc(doc(db, 'artifacts', appId, 'public', 'settings', 'church_config'))
+                // CORREÇÃO: Removido 'public' e mantido settings/church_config (4 segmentos - par)
+                getDoc(doc(db, 'artifacts', appId, 'settings', 'church_config'))
                     .then(s => { if(s.exists()) setChurchLocation(s.data()); })
                     .catch(e => console.error(e));
                     
@@ -261,10 +261,9 @@
                 setUserData(data);
             };
 
-            // ... Métodos de adicionar/editar (iguais ao anterior) ...
-             const addVisit = async () => {
+            const addVisit = async () => {
                 if(!newName.trim()) return;
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'visits'), {
+                await addDoc(collection(db, 'artifacts', appId, 'visits'), {
                     name: newName, address: newAddress, duration: newDuration,
                     lat: null, lng: null, assignedTo: null, orderIndex: 999, createdAt: serverTimestamp()
                 });
@@ -273,7 +272,7 @@
 
             const updateGPS = (id) => {
                 navigator.geolocation.getCurrentPosition(p => {
-                    updateDoc(doc(db, 'artifacts', appId, 'public', 'visits', id), {
+                    updateDoc(doc(db, 'artifacts', appId, 'visits', id), {
                         lat: p.coords.latitude, lng: p.coords.longitude
                     });
                     alert("GPS Atualizado!");
@@ -283,7 +282,7 @@
             const saveChurchGPS = () => {
                 navigator.geolocation.getCurrentPosition(async p => {
                     const data = { lat: p.coords.latitude, lng: p.coords.longitude };
-                    await setDoc(doc(db, 'artifacts', appId, 'public', 'settings', 'church_config'), data);
+                    await setDoc(doc(db, 'artifacts', appId, 'settings', 'church_config'), data);
                     setChurchLocation(data);
                     alert("Local da Igreja salvo!");
                     setConfigModalOpen(false);
@@ -295,14 +294,14 @@
                 if(!url) return;
                 const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || url.match(/q=(-?\d+\.\d+),(-?\d+\.\d+)/);
                 if(match) {
-                    updateDoc(doc(db, 'artifacts', appId, 'public', 'visits', id), {
+                    updateDoc(doc(db, 'artifacts', appId, 'visits', id), {
                         lat: parseFloat(match[1]), lng: parseFloat(match[2])
                     });
                 } else alert("Link inválido.");
             };
 
             const deleteVisit = (id) => {
-                if(confirm("Excluir da lista?")) deleteDoc(doc(db, 'artifacts', appId, 'public', 'visits', id));
+                if(confirm("Excluir da lista?")) deleteDoc(doc(db, 'artifacts', appId, 'visits', id));
             };
 
             const handleSmartDivide = () => {
@@ -316,7 +315,7 @@
                     const assignee = assigneeNames[gIdx];
                     if(!assignee) return;
                     group.forEach((v, idx) => {
-                        batch.push(updateDoc(doc(db, 'artifacts', appId, 'public', 'visits', v.id), {
+                        batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), {
                             assignedTo: assignee, assignedGroup: gIdx+1, orderIndex: idx
                         }));
                     });
@@ -340,7 +339,6 @@
                 window.open(url, '_blank');
             };
             
-             // Botão de Segurança (Limpa tudo)
             const forceLogout = () => {
                 localStorage.clear();
                 signOut(auth);
