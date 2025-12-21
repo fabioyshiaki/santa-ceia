@@ -27,7 +27,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, serverTimestamp, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "2.3.0 (Database Fix)";
+        const APP_VERSION = "2.4.0 (Link Fix)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (Coloque suas chaves aqui) ---
         const firebaseConfig = {
@@ -218,7 +218,6 @@
 
             React.useEffect(() => {
                 if (!user) return;
-                // CORREÇÃO: Removido 'public' do caminho para ter 3 segmentos (ímpar)
                 const q = query(collection(db, 'artifacts', appId, 'visits'));
                 const unsub = onSnapshot(q, (snap) => {
                     const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
@@ -228,7 +227,6 @@
                     console.error("Erro Firestore:", error);
                 });
                 
-                // CORREÇÃO: Removido 'public' e mantido settings/church_config (4 segmentos - par)
                 getDoc(doc(db, 'artifacts', appId, 'settings', 'church_config'))
                     .then(s => { if(s.exists()) setChurchLocation(s.data()); })
                     .catch(e => console.error(e));
@@ -290,14 +288,53 @@
             };
 
             const handleLinkGPS = (id) => {
-                const url = prompt("Cole o link do Google Maps:");
+                const url = prompt("Cole o link COMPLETO do Google Maps (da barra de endereço):");
                 if(!url) return;
-                const match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || url.match(/q=(-?\d+\.\d+),(-?\d+\.\d+)/);
-                if(match) {
+                
+                // Verifica links curtos que não funcionam
+                if (url.includes("goo.gl") || url.includes("maps.app.goo.gl")) {
+                    alert("⚠️ Links curtos (compartilhados do App) não funcionam diretamente.\n\nDica: Abra esse link no seu navegador primeiro, espere carregar, e copie o link longo da barra de endereços que contém os números (ex: @-23.5, -46.6).");
+                    return;
+                }
+
+                // Tenta vários formatos de URL
+                let lat, lng;
+                
+                // 1. Formato @lat,lng (Mais comum em navegadores)
+                let match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+                if (match) { lat = match[1]; lng = match[2]; }
+                
+                // 2. Formato q=lat,lng (Busca)
+                if (!lat) {
+                    match = url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+                    if (match) { lat = match[1]; lng = match[2]; }
+                }
+                
+                // 3. Formato ll=lat,lng (LatLong param)
+                if (!lat) {
+                    match = url.match(/[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)/);
+                    if (match) { lat = match[1]; lng = match[2]; }
+                }
+                
+                // 4. Formato !3dlat!4dlng (URL de dados/embed)
+                if (!lat) {
+                    match = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+                    if (match) { lat = match[1]; lng = match[2]; }
+                }
+                 // 5. Formato search/lat,lng
+                if (!lat) {
+                    match = url.match(/search\/(-?\d+\.\d+),(-?\d+\.\d+)/);
+                    if (match) { lat = match[1]; lng = match[2]; }
+                }
+
+                if(lat && lng) {
                     updateDoc(doc(db, 'artifacts', appId, 'visits', id), {
-                        lat: parseFloat(match[1]), lng: parseFloat(match[2])
+                        lat: parseFloat(lat), lng: parseFloat(lng)
                     });
-                } else alert("Link inválido.");
+                    alert("Localização salva com sucesso!");
+                } else {
+                    alert("Não foi possível encontrar as coordenadas no link.\nCertifique-se que o link tem o formato '@-12.34,-56.78'.");
+                }
             };
 
             const deleteVisit = (id) => {
