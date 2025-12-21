@@ -10,9 +10,7 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Leaflet CSS (Mapa Gratuito) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3652/3652191.png">
@@ -23,7 +21,6 @@
         input, textarea, select { user-select: text; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
         .map-container { height: 100%; width: 100%; z-index: 0; }
-        /* Ajuste para ícones do Leaflet em React */
         .leaflet-div-icon { background: transparent; border: none; }
     </style>
 </head>
@@ -35,7 +32,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "5.0.0 (Mapa Integrado)";
+        const APP_VERSION = "5.1.0 (Fixed Start/End)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -89,7 +86,7 @@
         }
 
         // --- COMPONENTE MAPA INTEGRADO ---
-        const EmbeddedMap = ({ visits, churchLocation, onClose }) => {
+        const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose }) => {
             const mapRef = React.useRef(null);
             
             React.useEffect(() => {
@@ -101,7 +98,6 @@
                         attribution: '© OpenStreetMap contributors'
                     }).addTo(map);
 
-                    // Ícones
                     const createIcon = (color, html) => L.divIcon({
                         className: 'custom-icon',
                         html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`,
@@ -109,32 +105,31 @@
                         iconAnchor: [15, 15]
                     });
 
-                    // Marcador Igreja (Início)
+                    const latlngs = [];
+
+                    // Início: Igreja
                     if (churchLocation && churchLocation.lat) {
                         L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') })
-                         .addTo(map)
-                         .bindPopup("<b>Início: Igreja</b>");
+                         .addTo(map).bindPopup("<b>Início: Igreja</b>");
+                        latlngs.push([churchLocation.lat, churchLocation.lng]);
                     }
 
-                    // Marcadores Visitas
-                    const latlngs = [];
-                    if (churchLocation && churchLocation.lat) latlngs.push([churchLocation.lat, churchLocation.lng]);
-
+                    // Visitas
                     visits.forEach((v, idx) => {
                         if (v.lat && v.lng) {
-                            const isLast = idx === visits.length - 1;
-                            const color = isLast ? '#dc2626' : '#16a34a'; // Vermelho para o fim, verde para as outras
-                            const label = isLast ? 'F' : (idx + 1);
-                            
-                            L.marker([v.lat, v.lng], { icon: createIcon(color, label) })
-                             .addTo(map)
-                             .bindPopup(`<b>${idx+1}. ${v.name}</b><br>${v.address}`);
-                            
+                            L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) })
+                             .addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`);
                             latlngs.push([v.lat, v.lng]);
                         }
                     });
 
-                    // Linha da Rota
+                    // Fim: Casa Pastor
+                    if (pastorLocation && pastorLocation.lat) {
+                        L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') })
+                         .addTo(map).bindPopup("<b>Fim: Casa do Pastor</b>");
+                        latlngs.push([pastorLocation.lat, pastorLocation.lng]);
+                    }
+
                     if (latlngs.length > 1) {
                         const polyline = L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map);
                         map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
@@ -149,7 +144,7 @@
                         mapRef.current = null;
                     }
                 };
-            }, [visits, churchLocation]);
+            }, [visits, churchLocation, pastorLocation]);
 
             return (
                 <div className="fixed inset-0 bg-white z-50 flex flex-col">
@@ -159,7 +154,7 @@
                     </div>
                     <div id="map-container" className="flex-1 bg-slate-100"></div>
                     <div className="p-2 bg-white border-t text-[10px] text-center text-slate-500 flex justify-center gap-4">
-                        <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-blue-600"></div> Início (Igreja)</span>
+                        <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-blue-600"></div> Início</span>
                         <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-green-600"></div> Visitas</span>
                         <span className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-red-600"></div> Fim</span>
                     </div>
@@ -192,7 +187,7 @@
             return R * c;
         };
 
-        const optimizeRoutes = (visits, k, startPoint, roundTrip = false) => {
+        const optimizeRoutes = (visits, k, startPoint) => {
             const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng));
             const unmappable = visits.filter(v => !safeFloat(v.lat) || !safeFloat(v.lng));
             if (validVisits.length === 0) return Array.from({ length: k }, () => []);
@@ -254,7 +249,6 @@
                 if (cluster.length === 0) return [];
                 let sorted = [];
                 let remaining = [...cluster];
-                // Start from church/base
                 let currentLocation = startPoint ? { lat: safeFloat(startPoint.lat), lng: safeFloat(startPoint.lng) } : { lat: safeFloat(remaining[0].lat), lng: safeFloat(remaining[0].lng) };
 
                 while (remaining.length > 0) {
@@ -276,10 +270,6 @@
                         remaining.splice(nearestIdx, 1);
                     } else break;
                 }
-                
-                // If round trip, we don't change the order much, but we conceptually "return"
-                // The current TSP is simple greedy nearest neighbor which is good enough
-                
                 return sorted;
             });
             
@@ -330,6 +320,7 @@
             // Data State
             const [visits, setVisits] = React.useState([]);
             const [churchLocation, setChurchLocation] = React.useState(null);
+            const [pastorLocation, setPastorLocation] = React.useState(null);
             const [lastUpdated, setLastUpdated] = React.useState(null);
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             
@@ -347,7 +338,6 @@
             const [renewTarget, setRenewTarget] = React.useState(null);
             const [renewDuration, setRenewDuration] = React.useState('1 Mês');
             const [splitCount, setSplitCount] = React.useState(2);
-            const [roundTrip, setRoundTrip] = React.useState(false);
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
@@ -411,6 +401,7 @@
                     if (parsed.date === today) {
                         setVisits(parsed.visits);
                         setChurchLocation(parsed.church);
+                        setPastorLocation(parsed.pastor);
                         setLastUpdated("Cache: " + parsed.timestamp);
                         setLoading(false);
                         return; 
@@ -441,13 +432,17 @@
                     const churchSnap = await getDoc(doc(db, 'artifacts', appId, 'settings', 'church_config'));
                     const churchData = churchSnap.exists() ? churchSnap.data() : null;
 
+                    const pastorSnap = await getDoc(doc(db, 'artifacts', appId, 'settings', 'pastor_config'));
+                    const pastorData = pastorSnap.exists() ? pastorSnap.data() : null;
+
                     setVisits(list);
                     setChurchLocation(churchData);
+                    setPastorLocation(pastorData);
                     const nowStr = new Date().toLocaleTimeString();
                     setLastUpdated(nowStr);
 
                     localStorage.setItem(cacheKey, JSON.stringify({
-                        date: today, timestamp: nowStr, visits: list, church: churchData
+                        date: today, timestamp: nowStr, visits: list, church: churchData, pastor: pastorData
                     }));
 
                 } catch (e) { alert("Erro ao baixar dados."); }
@@ -505,34 +500,29 @@
                 }, () => alert("Erro GPS"));
             };
 
-            const handleLinkGPS = async (id) => {
-                const url = prompt("Link do Google Maps:");
-                if(!url) return;
+            const resolveLink = async (url) => {
                 if (url.includes("goo.gl") || url.includes("maps.app.goo.gl")) {
-                    setIsProcessingLink(true);
                     try {
                         const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
                         const data = await response.json();
                         let match = data.contents.match(/center=(-?\d+\.\d+)%2C(-?\d+\.\d+)/) || 
                                     data.contents.match(/\/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-                        if (match) {
-                            await saveCoords(id, match[1], match[2]);
-                            setIsProcessingLink(false);
-                            return;
-                        }
-                    } catch(e) { console.error(e); }
-                    setIsProcessingLink(false);
-                    alert("Não consegui ler o link curto. Abra e copie o link completo.");
-                    return;
+                        return match ? { lat: match[1], lng: match[2] } : null;
+                    } catch(e) { return null; }
                 }
+                let match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+                return match ? { lat: match[1], lng: match[2] } : null;
+            };
 
-                let match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-                if (!match) match = url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
-                if (!match) match = url.match(/search\/(-?\d+\.\d+),(-?\d+\.\d+)/);
-                
-                if(match) {
-                    await saveCoords(id, match[1], match[2]);
-                } else alert("Coordenadas não encontradas no link.");
+            const handleLinkGPS = async (id) => {
+                const url = prompt("Link do Google Maps:");
+                if(!url) return;
+                setIsProcessingLink(true);
+                const coords = await resolveLink(url);
+                setIsProcessingLink(false);
+                if (coords) {
+                    await saveCoords(id, coords.lat, coords.lng);
+                } else alert("Não consegui ler o link. Tente o link completo.");
             };
 
             const saveCoords = async (id, lat, lng) => {
@@ -543,15 +533,34 @@
                 refreshData();
             };
 
-            const saveChurchGPS = async () => {
-                navigator.geolocation.getCurrentPosition(async p => {
-                    const data = { lat: p.coords.latitude, lng: p.coords.longitude };
-                    await setDoc(doc(db, 'artifacts', appId, 'settings', 'church_config'), data);
-                    setChurchLocation(data);
-                    alert("Base salva!");
-                    setConfigModalOpen(false);
-                    refreshData();
-                });
+            // Salva Igreja por Link ou GPS
+            const saveLocationConfig = async (type) => {
+                const isChurch = type === 'church';
+                const collectionName = isChurch ? 'church_config' : 'pastor_config';
+                
+                if (confirm("Usar GPS atual? (Cancelar para usar Link)")) {
+                    navigator.geolocation.getCurrentPosition(async p => {
+                        const data = { lat: p.coords.latitude, lng: p.coords.longitude };
+                        await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data);
+                        if (isChurch) setChurchLocation(data); else setPastorLocation(data);
+                        alert("Local salvo!");
+                        refreshData();
+                    });
+                } else {
+                    const url = prompt("Cole o Link do Google Maps:");
+                    if (url) {
+                        setIsProcessingLink(true);
+                        const coords = await resolveLink(url);
+                        setIsProcessingLink(false);
+                        if (coords) {
+                            const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) };
+                            await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data);
+                            if (isChurch) setChurchLocation(data); else setPastorLocation(data);
+                            alert("Local salvo pelo Link!");
+                            refreshData();
+                        } else alert("Link inválido.");
+                    }
+                }
             };
 
             const deleteVisit = async (id) => {
@@ -644,23 +653,31 @@
                 // Ordenar
                 const sorted = [...validPoints].sort((a,b) => (a.orderIndex||0)-(b.orderIndex||0));
 
-                const launchMaps = (startLat, startLng) => {
+                const launchMaps = (startLat, startLng, endLat, endLng) => {
                     const coordsList = [];
                     // Start
                     if (startLat && startLng) coordsList.push(`${safeFloat(startLat)},${safeFloat(startLng)}`);
                     // Waypoints
                     sorted.forEach(v => coordsList.push(`${safeFloat(v.lat)},${safeFloat(v.lng)}`));
+                    // End (Pastor)
+                    if (endLat && endLng) coordsList.push(`${safeFloat(endLat)},${safeFloat(endLng)}`);
                     
                     const url = `https://www.google.com/maps/dir/${coordsList.join('/')}`;
                     window.open(url, '_blank');
                 };
 
-                if (churchLocation && safeFloat(churchLocation.lat)) {
-                    launchMaps(churchLocation.lat, churchLocation.lng);
+                // Lógica de Prioridade: Configurações > GPS Atual
+                const sLat = churchLocation?.lat;
+                const sLng = churchLocation?.lng;
+                const eLat = pastorLocation?.lat;
+                const eLng = pastorLocation?.lng;
+
+                if (sLat) {
+                    launchMaps(sLat, sLng, eLat, eLng);
                 } else {
                     navigator.geolocation.getCurrentPosition(
-                        (p) => launchMaps(p.coords.latitude, p.coords.longitude),
-                        () => launchMaps(null, null)
+                        (p) => launchMaps(p.coords.latitude, p.coords.longitude, eLat, eLng),
+                        () => launchMaps(null, null, eLat, eLng)
                     );
                 }
             };
@@ -734,14 +751,15 @@
                     {showMap && (
                         <EmbeddedMap 
                             visits={mapData} 
-                            churchLocation={churchLocation} 
+                            churchLocation={churchLocation}
+                            pastorLocation={pastorLocation}
                             onClose={() => setShowMap(false)} 
                         />
                     )}
 
                     <header className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex justify-between items-center shadow-sm">
                         <div>
-                            <h1 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Users /> Santa Ceia</h1>
+                            <h1 className="font-bold text-slate-800 flex items-center gap-2"><Icons.Users /> Santa Ceia dos Enfermos</h1>
                             <p className="text-[10px] text-slate-400 flex items-center gap-1">
                                 {loading ? 'A carregar...' : `Dados: ${lastUpdated}`}
                             </p>
@@ -767,10 +785,6 @@
                                             </select>
                                             <Button onClick={handleSmartDivide}>Gerar</Button>
                                         </div>
-                                        <label className="flex items-center space-x-2 text-sm text-slate-600 mt-2">
-                                            <input type="checkbox" checked={roundTrip} onChange={() => setRoundTrip(!roundTrip)} className="w-4 h-4"/>
-                                            <span>Voltar à Base no final? (Rota Circular)</span>
-                                        </label>
                                     </div>
                                 </div>
 
@@ -914,10 +928,31 @@
                     {configModalOpen && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
-                                <h3 className="font-bold mb-2 flex items-center gap-2"><Icons.Home/> Base da Igreja</h3>
-                                <p className="text-sm text-slate-500 mb-4">Ponto de partida dos roteiros.</p>
-                                <Button onClick={saveChurchGPS} className="w-full mb-2"><Icons.MapPin className="mr-2"/> Usar GPS atual</Button>
-                                <Button onClick={()=>setConfigModalOpen(false)} variant="ghost" className="w-full">Fechar</Button>
+                                <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Settings/> Configurações de Rota</h3>
+                                
+                                <div className="space-y-4">
+                                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                        <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Local de Início (Igreja)</label>
+                                        <div className="flex gap-2">
+                                            <div className="text-sm truncate flex-1 text-slate-700">
+                                                {churchLocation ? `📍 ${churchLocation.lat}, ${churchLocation.lng}` : 'Não definido'}
+                                            </div>
+                                            <button onClick={() => saveLocationConfig('church')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">Colar Link</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                        <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Local de Fim (Casa do Pastor)</label>
+                                        <div className="flex gap-2">
+                                            <div className="text-sm truncate flex-1 text-slate-700">
+                                                {pastorLocation ? `📍 ${pastorLocation.lat}, ${pastorLocation.lng}` : 'Não definido'}
+                                            </div>
+                                            <button onClick={() => saveLocationConfig('pastor')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">Colar Link</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <Button onClick={()=>setConfigModalOpen(false)} variant="ghost" className="w-full mt-6">Fechar</Button>
                                 <p className="text-center text-[10px] text-slate-300 mt-2">v{APP_VERSION}</p>
                             </div>
                         </div>
