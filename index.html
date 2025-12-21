@@ -33,7 +33,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "4.0.0"; // Nome Atualizado
+        const APP_VERSION = "4.1.0 (Rota Fixa)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -65,8 +65,7 @@
             Clock: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
             Refresh: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>,
             CloudDownload: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
-            ChurchCheck: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>,
-            Bug: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="8" height="14" x="8" y="6" rx="4"/><path d="m19 13-3-3Q14 8 14 6"/><path d="m5 13 3-3Q10 8 10 6"/><path d="m5 13 3 3Q10 18 10 20"/><path d="m19 13-3 3Q14 18 14 20"/></svg>
+            ChurchCheck: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>
         };
 
         class ErrorBoundary extends React.Component {
@@ -245,10 +244,6 @@
             const [lastUpdated, setLastUpdated] = React.useState(null);
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             
-            // Debug State
-            const [debugMode, setDebugMode] = React.useState(false);
-            const [debugRoute, setDebugRoute] = React.useState(null);
-
             // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
@@ -551,34 +546,31 @@
                 // Sorting
                 const sorted = [...validPoints].sort((a,b) => (a.orderIndex||0)-(b.orderIndex||0));
 
-                let pathParts = [];
-                let debugList = [];
+                // CORREÇÃO DA ROTA: Usar api=1&destination=...
+                // O último ponto é o destino final
+                const lastPoint = sorted[sorted.length - 1];
+                const destination = `${safeFloat(lastPoint.lat)},${safeFloat(lastPoint.lng)}`;
 
-                // Add Church
+                // Waypoints são todos menos o último
+                // A origem ou é a Igreja ou a localização atual (deixada em branco na API)
+                const waypointsList = sorted.slice(0, sorted.length - 1);
+                const waypoints = waypointsList.map(v => `${safeFloat(v.lat)},${safeFloat(v.lng)}`).join('|');
+
+                let url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
+
+                // Se tiver igreja, define como origem
                 if (churchLocation && churchLocation.lat) {
                     const cLat = safeFloat(churchLocation.lat);
                     const cLng = safeFloat(churchLocation.lng);
-                    pathParts.push(`${cLat},${cLng}`);
-                    debugList.push({ name: "[INÍCIO] Igreja/Base", lat: cLat, lng: cLng });
-                } else {
-                    debugList.push({ name: "[INÍCIO] Sua Localização Atual", lat: "?", lng: "?" });
+                    url += `&origin=${cLat},${cLng}`;
                 }
-                
-                // Add Houses
-                sorted.forEach(v => {
-                    const lat = safeFloat(v.lat);
-                    const lng = safeFloat(v.lng);
-                    pathParts.push(`${lat},${lng}`);
-                    debugList.push({ name: v.name, lat: lat, lng: lng });
-                });
+                // Se não tiver igreja, não põe origin, e o Google Maps usa "Minha Localização"
 
-                const url = `https://www.google.com/maps/dir/${pathParts.join('/')}`;
-
-                if (debugMode) {
-                    setDebugRoute({ url, points: debugList });
-                } else {
-                    window.open(url, '_blank');
+                if (waypoints.length > 0) {
+                    url += `&waypoints=${waypoints}`;
                 }
+
+                window.open(url, '_blank');
             };
             
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
@@ -811,52 +803,10 @@
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
                                 <h3 className="font-bold mb-2 flex items-center gap-2"><Icons.Home/> Base</h3>
                                 <Button onClick={saveChurchGPS} className="w-full mb-2"><Icons.MapPin className="mr-2"/> Usar GPS</Button>
-                                
-                                <div className="mt-4 border-t pt-4">
-                                    <h4 className="font-bold text-sm mb-2 flex items-center gap-2"><Icons.Bug/> Opções Avançadas</h4>
-                                    <label className="flex items-center space-x-2 text-sm bg-slate-100 p-2 rounded cursor-pointer">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={debugMode} 
-                                            onChange={() => setDebugMode(!debugMode)}
-                                            className="w-4 h-4"
-                                        />
-                                        <span>Modo Debug (Verificar Rota)</span>
-                                    </label>
-                                    <p className="text-[10px] text-slate-400 mt-1">Ative se as rotas estiverem incorretas para ver as coordenadas.</p>
-                                </div>
-
-                                <Button onClick={()=>setConfigModalOpen(false)} variant="ghost" className="w-full mt-4">Fechar</Button>
-                                <p className="text-center text-[10px] text-slate-300 mt-2">v{APP_VERSION}</p>
+                                <Button onClick={()=>setConfigModalOpen(false)} variant="ghost" className="w-full">Fechar</Button>
                             </div>
                         </div>
                     )}
-
-                    {debugRoute && (
-                        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-2xl p-4 w-full max-w-lg h-[80vh] flex flex-col">
-                                <h3 className="font-bold text-red-600 mb-2">MODO DEBUG</h3>
-                                <p className="text-xs text-slate-500 mb-2">Verifique se as coordenadas (Lat, Lng) estão corretas.</p>
-                                <div className="flex-1 overflow-auto border rounded p-2 bg-slate-50 text-xs font-mono">
-                                    {debugRoute.points.map((p, i) => (
-                                        <div key={i} className="mb-2 pb-2 border-b last:border-0">
-                                            <strong>{i}. {p.name}</strong><br/>
-                                            Lat: {p.lat} <br/>
-                                            Lng: {p.lng}
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="mt-2 space-y-2">
-                                    <textarea readOnly className="w-full h-16 p-2 text-[10px] border rounded" value={debugRoute.url}></textarea>
-                                    <div className="flex gap-2">
-                                        <Button onClick={() => setDebugRoute(null)} variant="secondary" className="flex-1">Fechar</Button>
-                                        <Button onClick={() => window.open(debugRoute.url, '_blank')} className="flex-1">Abrir Mapa</Button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
                     {renewTarget && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
