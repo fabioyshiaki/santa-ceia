@@ -7,20 +7,20 @@
     
     <!-- CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
 
-    <!-- React -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- React (Com Crossorigin para ver erros reais) -->
+    <script crossorigin="anonymous" src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin="anonymous" src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin="anonymous" src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <!-- Leaflet -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script crossorigin="anonymous" src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- FIREBASE COMPAT (Versão Global - Mais estável para este uso) -->
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <!-- FIREBASE COMPAT (Versão Global com Crossorigin) -->
+    <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
 
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3652/3652191.png">
     
@@ -35,23 +35,84 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <!-- Error Handler Global -->
+    <!-- Error Handler Global Avançado -->
     <script>
-        window.onerror = function(message, source, lineno, colno, error) {
+        // Função para exibir erro na tela
+        function showCriticalError(msg, details) {
             const root = document.getElementById('root');
-            if(root && !document.getElementById('error-screen')) {
-                root.innerHTML = '<div id="error-screen" style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
-                                 '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Erro Detetado</h2>' +
-                                 '<p style="font-size:14px; margin-bottom:20px; background:#fee2e2; padding:10px; border-radius:5px; word-break:break-word;">' + message + '</p>' +
-                                 '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Reiniciar Aplicação</button>' +
-                                 '</div>';
+            const errorText = `Erro: ${msg}\nDetalhes: ${details}\nUserAgent: ${navigator.userAgent}`;
+            
+            // Cria UI de Erro se não existir
+            if (!document.getElementById('error-overlay')) {
+                document.body.innerHTML += `
+                    <div id="error-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:white; z-index:9999; padding:20px; overflow:auto; font-family:sans-serif;">
+                        <h2 style="color:#dc2626; font-size:24px; font-weight:bold; margin-bottom:10px;">Ops! Ocorreu um erro.</h2>
+                        <p style="color:#4b5563; margin-bottom:20px;">O aplicativo encontrou um problema inesperado.</p>
+                        
+                        <div style="background:#f3f4f6; padding:15px; border-radius:8px; border:1px solid #d1d5db; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; margin-bottom:20px; color:#1f2937;">
+                            <strong>Mensagem:</strong> ${msg}<br><br>
+                            <strong>Detalhes:</strong> ${details}
+                        </div>
+
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button onclick="copyToClipboard('${errorText.replace(/\n/g, "\\n").replace(/'/g, "\\'")}')" style="background:#2563eb; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1;">
+                                📋 Copiar Erro
+                            </button>
+                            <button onclick="window.location.reload()" style="background:#ef4444; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1;">
+                                🔄 Reiniciar
+                            </button>
+                            <button onclick="localStorage.clear(); window.location.reload()" style="background:#9ca3af; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1;">
+                                🧹 Limpar Dados
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Função de cópia robusta
+        window.copyToClipboard = function(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => alert('Erro copiado!'), () => fallbackCopy(text));
+            } else {
+                fallbackCopy(text);
             }
         };
+
+        function fallbackCopy(text) {
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert('Erro copiado (modo compatibilidade)!');
+            } catch (err) {
+                alert('Não foi possível copiar. Por favor tire um print.');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        // Captura erros de script normais
+        window.onerror = function(message, source, lineno, colno, error) {
+            // Se for "Script error." genérico, tenta dar dica
+            if (message === 'Script error.') {
+                message = "Erro de Script Externo (Possível bloqueio de CORS ou falha de rede)";
+            }
+            showCriticalError(message, `Fonte: ${source}\nLinha: ${lineno}:${colno}\nStack: ${error ? error.stack : 'N/A'}`);
+            return true; // Previne log duplo na consola
+        };
+
+        // Captura erros de Promessas (Async/Await, Firebase, etc)
+        window.addEventListener('unhandledrejection', function(event) {
+            showCriticalError(event.reason ? event.reason.message : 'Erro Desconhecido', 'Falha numa operação assíncrona (Promise Rejection)');
+        });
     </script>
 
     <script type="text/babel">
         // --- 1. CONFIGURAÇÃO (GLOBAL) ---
-        const APP_VERSION = "13.0.1 (White Screen Fix)";
+        const APP_VERSION = "13.1.0 (Detailed Diagnostic)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -77,7 +138,8 @@
                 auth = firebase.auth();
                 db = firebase.firestore();
             } catch (e) {
-                console.error("Erro Firebase:", e);
+                // Erro será apanhado pelo handler global acima, mas lançamos aqui para garantir
+                throw new Error("Falha ao inicializar Firebase: " + e.message);
             }
         }
 
@@ -273,86 +335,72 @@
             
             React.useEffect(() => {
                 if (googleApiKey) {
-                    loadGoogleMapsScript(googleApiKey).then(() => setScriptLoaded(true)).catch(console.error);
-                } else {
-                    setScriptLoaded(true);
-                }
+                    if (window.google && window.google.maps) { setScriptLoaded(true); return; }
+                    const script = document.createElement('script');
+                    script.id = 'google-maps-script';
+                    script.src = `https://maps.googleapis.com/maps/api/js?key=${googleApiKey}&libraries=geometry`;
+                    script.async = true; script.defer = true;
+                    script.onload = () => setScriptLoaded(true);
+                    script.onerror = () => { console.error("Falha ao carregar Google Maps"); setScriptLoaded(true); };
+                    document.body.appendChild(script);
+                } else { setScriptLoaded(true); }
             }, [googleApiKey]);
 
             React.useEffect(() => {
                 if (!scriptLoaded || !mapContainerRef.current) return;
                 
-                if (googleApiKey && window.google) {
-                    const startLat = churchLocation ? safeFloat(churchLocation.lat) : safeFloat(visits[0]?.lat);
-                    const startLng = churchLocation ? safeFloat(churchLocation.lng) : safeFloat(visits[0]?.lng);
-                    const map = new window.google.maps.Map(mapContainerRef.current, {
-                        center: { lat: startLat, lng: startLng }, zoom: 13, disableDefaultUI: false
-                    });
+                const center = churchLocation ? [safeFloat(churchLocation.lat), safeFloat(churchLocation.lng)] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
 
+                if (googleApiKey && window.google) {
+                    const map = new window.google.maps.Map(mapContainerRef.current, { center: { lat: center[0], lng: center[1] }, zoom: 13 });
                     const points = [];
                     if (churchLocation) points.push({ pos: churchLocation, title: "Igreja", color: "blue" });
                     visits.forEach((v, i) => { if(v.lat) points.push({ pos: v, title: `${i+1}. ${v.name}`, color: "green" }); });
                     if (pastorLocation) points.push({ pos: pastorLocation, title: "Pastor", color: "red" });
-
+                    
                     if (points.length > 1) {
                          const directionsService = new window.google.maps.DirectionsService();
-                         const directionsRenderer = new window.google.maps.DirectionsRenderer({ map, suppressMarkers: false });
+                         const directionsRenderer = new window.google.maps.DirectionsRenderer({ map });
                          const origin = new window.google.maps.LatLng(safeFloat(points[0].pos.lat), safeFloat(points[0].pos.lng));
                          const destination = new window.google.maps.LatLng(safeFloat(points[points.length-1].pos.lat), safeFloat(points[points.length-1].pos.lng));
-                         const waypoints = points.slice(1, -1).map(p => ({
-                             location: new window.google.maps.LatLng(safeFloat(p.pos.lat), safeFloat(p.pos.lng)),
-                             stopover: true
-                         }));
+                         const waypoints = points.slice(1, -1).map(p => ({ location: new window.google.maps.LatLng(safeFloat(p.pos.lat), safeFloat(p.pos.lng)), stopover: true }));
                          directionsService.route({ origin, destination, waypoints, travelMode: window.google.maps.TravelMode.DRIVING }, (res, status) => { if (status === 'OK') directionsRenderer.setDirections(res); });
                     }
                     return;
                 }
 
-                const center = churchLocation ? [churchLocation.lat, churchLocation.lng] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
+                // LEAFLET FALLBACK
                 const map = L.map(mapContainerRef.current).setView(center, 13);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
-
-                const createIcon = (color, html) => L.divIcon({
-                    className: 'custom-icon',
-                    html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`,
-                    iconSize: [30, 30], iconAnchor: [15, 15]
-                });
-
+                const createIcon = (color, html) => L.divIcon({ className: 'custom-icon', html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+                
                 const latlngs = [];
                 if (churchLocation && churchLocation.lat) {
-                    L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') }).addTo(map).bindPopup("<b>Início: Igreja</b>");
-                    latlngs.push([churchLocation.lat, churchLocation.lng]);
+                     L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') }).addTo(map).bindPopup("<b>Início: Igreja</b>");
+                     latlngs.push([churchLocation.lat, churchLocation.lng]);
                 }
-                visits.forEach((v, idx) => {
-                    if (v.lat && v.lng) {
-                        L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) }).addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`);
+                visits.forEach((v, idx) => { 
+                    if (v.lat && v.lng) { 
+                        L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) }).addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`); 
                         latlngs.push([v.lat, v.lng]);
-                    }
+                    } 
                 });
-                if (pastorLocation && pastorLocation.lat) {
-                    L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') }).addTo(map).bindPopup("<b>Fim</b>");
+                if (pastorLocation && pastorLocation.lat) { 
+                    L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') }).addTo(map).bindPopup("<b>Fim</b>"); 
                     latlngs.push([pastorLocation.lat, pastorLocation.lng]);
                 }
-                if (latlngs.length > 1) {
-                    const polyline = L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map);
-                    map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+
+                if (latlngs.length > 1) { 
+                    L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map); 
+                    map.fitBounds(L.polyline(latlngs).getBounds(), { padding: [50, 50] }); 
                 }
 
                 return () => map.remove();
-            }, [scriptLoaded, visits, churchLocation, pastorLocation, googleApiKey]);
+            }, [scriptLoaded, visits]);
 
-            return (
-                <div className="fixed inset-0 bg-white z-50 flex flex-col">
-                    <div className="bg-white p-4 border-b flex justify-between items-center shadow-sm z-10">
-                        <h3 className="font-bold text-slate-800">Mapa da Rota</h3>
-                        <button onClick={onClose} className="bg-slate-100 p-2 rounded-full text-slate-600">✕</button>
-                    </div>
-                    <div ref={mapContainerRef} className="flex-1 bg-slate-100 h-full w-full"></div>
-                </div>
-            );
+            return <div className="fixed inset-0 bg-white z-50 flex flex-col"><div className="p-4 border-b flex justify-between"><h3 className="font-bold">Mapa</h3><button onClick={onClose}>✕</button></div><div ref={mapContainerRef} className="flex-1 h-full w-full"></div></div>;
         };
 
-        // --- APP ---
         function App() {
             if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
 
@@ -395,49 +443,25 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // --- 5. DERIVED STATE ---
-            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
-
-            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
-            
-            const activeGroups = {};
-            if (isPastor) {
-                visits.forEach(v => {
-                    if (v.assignedGroup && v.assignedTo) {
-                        if (!activeGroups[v.assignedGroup]) activeGroups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
-                        activeGroups[v.assignedGroup].count++;
-                    }
-                });
-            }
-
             React.useEffect(() => {
                 const unsub = auth.onAuthStateChanged(async (u) => {
                     setUser(u);
                     if (u) {
-                        const savedProfile = localStorage.getItem(`profile_${u.uid}`);
                         if (u.email === SUPER_ADMIN_EMAIL) {
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
-                            localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
                             setIsAdminMode(false);
-                            // Ensure Super Admin is saved in DB for team selection
-                            await db.collection('artifacts').doc(APP_ID).collection('users').doc(u.uid).set(adminProfile); 
-                        } else if (savedProfile) {
-                            const parsed = JSON.parse(savedProfile);
-                            setUserData(parsed);
-                            setIsAdminMode(parsed.role === 'pastor');
+                            // Sincroniza Super Admin no DB para aparecer nas listas
+                            db.collection('artifacts').doc(APP_ID).collection('users').doc(u.uid).set(adminProfile);
                         } else {
                             db.collection('artifacts').doc(APP_ID).collection('users').doc(u.uid).get().then(doc => {
                                 if (doc.exists) {
-                                    const data = doc.data();
-                                    localStorage.setItem(`profile_${u.uid}`, JSON.stringify(data));
-                                    setUserData(data);
-                                    setIsAdminMode(data.role === 'pastor');
+                                    setUserData(doc.data());
+                                    setIsAdminMode(doc.data().role === 'pastor');
                                 }
                             });
                         }
+                        loadData();
                     } else {
                         setUserData(null);
                     }
@@ -489,45 +513,24 @@
                 try {
                     const snap = await db.collection('artifacts').doc(APP_ID).collection('visits').get();
                     const list = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                    list.sort((a,b) => (a.orderIndex||999) - (b.orderIndex||999));
-                    
-                    const batch = db.batch();
-                    let cleanupNeeded = false;
-                    list.forEach(v => {
-                         if (v.assignedGroup && v.assignmentDate) {
-                            const assignDate = new Date(v.assignmentDate);
-                            if (now.getMonth() !== assignDate.getMonth() || now.getFullYear() !== assignDate.getFullYear()) {
-                                const ref = db.collection('artifacts').doc(APP_ID).collection('visits').doc(v.id);
-                                batch.update(ref, {
-                                    assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null
-                                });
-                                v.assignedTo = null; v.assignedGroup = null;
-                                cleanupNeeded = true;
-                            }
-                        }
-                    });
-                    
-                    if (cleanupNeeded) await batch.commit();
+                    setVisits(list.sort((a,b) => (a.orderIndex||999) - (b.orderIndex||999)));
 
                     const churchSnap = await db.collection('artifacts').doc(APP_ID).collection('settings').doc('church_config').get();
-                    const churchData = churchSnap.exists ? churchSnap.data() : null;
+                    if(churchSnap.exists) setChurchLocation(churchSnap.data());
 
                     const pastorSnap = await db.collection('artifacts').doc(APP_ID).collection('settings').doc('pastor_config').get();
-                    const pastorData = pastorSnap.exists ? pastorSnap.data() : null;
-                    
+                    if(pastorSnap.exists) setPastorLocation(pastorSnap.data());
+
                     const apiSnap = await db.collection('artifacts').doc(APP_ID).collection('settings').doc('api_keys').get();
-                    const apiKeyData = apiSnap.exists ? apiSnap.data().googleMaps : null;
+                    if(apiSnap.exists) setGoogleApiKey(apiSnap.data().googleMaps);
 
-                    setVisits(list);
-                    setChurchLocation(churchData);
-                    setPastorLocation(pastorData);
-                    setGoogleApiKey(apiKeyData);
-                    const nowStr = new Date().toLocaleTimeString();
-                    setLastUpdated(nowStr);
-
-                    localStorage.setItem(cacheKey, JSON.stringify({
-                        date: today, timestamp: nowStr, visits: list, church: churchData, pastor: pastorData, apiKey: apiKeyData
+                    setLastUpdated(new Date().toLocaleTimeString());
+                    
+                    // Salvar cache
+                     localStorage.setItem(cacheKey, JSON.stringify({
+                        date: today, timestamp: new Date().toLocaleTimeString(), visits: list, church: churchSnap.exists ? churchSnap.data() : null, pastor: pastorSnap.exists ? pastorSnap.data() : null, apiKey: apiSnap.exists ? apiSnap.data().googleMaps : null
                     }));
+
                 } catch (e) { console.error("Erro dados", e); }
                 setLoading(false);
             };
@@ -718,8 +721,11 @@
                 </div>
             );
 
-            // --- FILTRAGEM SEGURA USANDO DERIVED STATE ---
-            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
+            const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
+            const isPastor = (isSuperAdmin && isAdminMode) || userData.role === 'pastor';
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData.role === 'pastor' || userData.canEditGPS;
+
+            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
             
             const activeGroups = {};
             if (isPastor) {
@@ -884,6 +890,7 @@
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <h3 className={`font-bold flex items-center gap-2 ${isChecked ? 'text-green-700 line-through' : (expired ? 'text-red-700' : '')}`}>{v.name} {isChecked && <Icons.CheckCircle size={16} />}</h3>
+                                                            {v.lat && v.lng && <p className="text-[10px] text-slate-400 font-mono mb-1">{safeFloat(v.lat).toFixed(5)}, {safeFloat(v.lng).toFixed(5)}</p>}
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
                                                         {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
@@ -919,31 +926,6 @@
                             </div>
                         )}
                     </main>
-                    
-                    {teamModalOpen && (
-                        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto">
-                                <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Users/> Gestão de Equipa</h3>
-                                <div className="space-y-4">
-                                    <h4 className="font-bold text-xs text-blue-800 uppercase border-b pb-1">Presbíteros</h4>
-                                    {availableOfficers.presbiteros.map(u => (
-                                        <div key={u.uid} className="flex items-center justify-between py-2">
-                                            <span className="text-sm">{u.name}</span>
-                                            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={u.canEditGPS || false} onChange={() => handleToggleGPSPermission(u.uid, u.canEditGPS)} /> Editar GPS</label>
-                                        </div>
-                                    ))}
-                                    <h4 className="font-bold text-xs text-blue-800 uppercase border-b pb-1 mt-4">Diáconos</h4>
-                                    {availableOfficers.diaconos.map(u => (
-                                        <div key={u.uid} className="flex items-center justify-between py-2">
-                                            <span className="text-sm">{u.name}</span>
-                                            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={u.canEditGPS || false} onChange={() => handleToggleGPSPermission(u.uid, u.canEditGPS)} /> Editar GPS</label>
-                                        </div>
-                                    ))}
-                                </div>
-                                <Button onClick={()=>setTeamModalOpen(false)} variant="ghost" className="w-full mt-6">Fechar</Button>
-                            </div>
-                        </div>
-                    )}
 
                     {configModalOpen && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
