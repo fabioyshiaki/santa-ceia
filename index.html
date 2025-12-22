@@ -5,13 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Santa Ceia dos Enfermos</title>
     
-    <!-- Bibliotecas Essenciais -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Mapas -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
@@ -29,20 +27,13 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <!-- Error Handler Global -->
-    <script>
-        window.onerror = function(message, source, lineno, colno, error) {
-            document.body.innerHTML = '<div style="padding:20px; color:red; font-family:sans-serif;"><h2>Erro Crítico</h2><p>' + message + '</p><button onclick="location.reload()" style="padding:10px; background:#eee; border:1px solid #ccc; border-radius:5px;">Recarregar</button></div>';
-        };
-    </script>
-
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- 1. CONSTANTES ---
-        const APP_VERSION = "12.6.0 (Safe Mode)";
+        const APP_VERSION = "12.6.1 (Full Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1";
 
@@ -142,7 +133,6 @@
                         });
                         if (totalVariance < bestScore) {
                             bestScore = totalVariance;
-                            // Simplificação da distribuição para brevidade
                             bestClusters = clusters; 
                         }
                     }
@@ -252,12 +242,7 @@
             
             React.useEffect(() => {
                 if (googleApiKey) {
-                    const script = document.createElement('script');
-                    script.src = `https://maps.googleapis.com/maps/api/js?key=${googleApiKey}&libraries=geometry`;
-                    script.async = true;
-                    script.defer = true;
-                    script.onload = () => setScriptLoaded(true);
-                    document.body.appendChild(script);
+                    loadGoogleMapsScript(googleApiKey).then(() => setScriptLoaded(true)).catch(console.error);
                 } else {
                     setScriptLoaded(true);
                 }
@@ -336,9 +321,10 @@
             );
         };
 
-        // --- APP PRINCIPAL (MainApp) ---
-        // Isolado para garantir que os Hooks só correm se configurado
-        function MainApp() {
+        // --- APP ---
+        function App() {
+            if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
+
             const [user, setUser] = React.useState(null);
             const [userData, setUserData] = React.useState(null);
             const [loading, setLoading] = React.useState(true);
@@ -348,6 +334,7 @@
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
 
+            // Data State
             const [visits, setVisits] = React.useState([]);
             const [usersList, setUsersList] = React.useState([]);
             const [churchLocation, setChurchLocation] = React.useState(null);
@@ -357,9 +344,11 @@
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             const [isOptimizing, setIsOptimizing] = React.useState(false);
             
+            // Map State
             const [showMap, setShowMap] = React.useState(false);
             const [mapData, setMapData] = React.useState([]);
 
+            // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
             const [newAddress, setNewAddress] = React.useState('');
@@ -377,6 +366,11 @@
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
+
+            // --- 5. DERIVED STATE ---
+            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
 
             React.useEffect(() => {
                 const unsub = onAuthStateChanged(auth, async (u) => {
@@ -525,8 +519,6 @@
             };
 
             const refreshData = () => loadData(true);
-
-            // Re-used helpers for logic...
             const resolveInputToCoords = async (input) => {
                 const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
                 if (commaMatch) return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
@@ -618,10 +610,7 @@
                 </div>
             );
 
-            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
-
+            // --- FILTRAGEM SEGURA USANDO DERIVED STATE ---
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
             
             const activeGroups = {};
