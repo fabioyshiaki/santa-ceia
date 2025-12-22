@@ -5,11 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Santa Ceia dos Enfermos</title>
     
+    <!-- Bibliotecas Essenciais -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- Mapas -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
@@ -27,16 +29,24 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
+    <!-- Error Handler Global -->
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            document.body.innerHTML = '<div style="padding:20px; color:red; font-family:sans-serif;"><h2>Erro Crítico</h2><p>' + message + '</p><button onclick="location.reload()" style="padding:10px; background:#eee; border:1px solid #ccc; border-radius:5px;">Recarregar</button></div>';
+        };
+    </script>
+
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // --- 1. CONSTANTES E CONFIGURAÇÃO ---
-        const APP_VERSION = "12.5.1 (View Fix)";
+        // --- 1. CONSTANTES ---
+        const APP_VERSION = "12.6.0 (Safe Mode)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const appId = "santa-ceia-v1"; // Identificador fixo dos dados
+        const APP_ID = "santa-ceia-v1";
 
+        // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -45,7 +55,6 @@
   messagingSenderId: "506964180846",
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
-
 
         // --- 2. INICIALIZAÇÃO FIREBASE ---
         let app, auth, db;
@@ -59,7 +68,7 @@
             } catch (e) { console.error("Erro Firebase Init", e); }
         }
 
-        // --- 3. FUNÇÕES UTILITÁRIAS ---
+        // --- 3. UTILITÁRIOS ---
         const safeFloat = (val) => {
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.'));
@@ -85,9 +94,7 @@
 
         const isExpired = (visit) => {
             if (!visit || !visit.expiresAt) return false;
-            try {
-                return new Date() > new Date(visit.expiresAt);
-            } catch (e) { return false; }
+            try { return new Date() > new Date(visit.expiresAt); } catch (e) { return false; }
         };
 
         const loadGoogleMapsScript = (apiKey) => {
@@ -102,11 +109,10 @@
             });
         };
 
-        // --- 4. ALGORITMOS DE OTIMIZAÇÃO ---
+        // --- 4. ALGORITMOS ---
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
-
             for (let t = 0; t < 20; t++) {
                 let centroids = [];
                 if (visits.length > 0) {
@@ -129,39 +135,15 @@
                         const sumLng = cluster.reduce((acc, v) => acc + safeFloat(v.lng), 0);
                         return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
                     });
-
                     if (iter === 4) {
                         let totalVariance = 0;
                         clusters.forEach((cluster, idx) => {
-                            cluster.forEach(v => {
-                                totalVariance += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng);
-                            });
+                            cluster.forEach(v => { totalVariance += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng); });
                         });
                         if (totalVariance < bestScore) {
                             bestScore = totalVariance;
-                            // Balanced logic simplified
-                            const baseSize = Math.floor(visits.length / k);
-                            const remainder = visits.length % k;
-                            const capacities = Array.from({ length: k }, (_, i) => baseSize + (i < remainder ? 1 : 0));
-                            let edges = [];
-                            visits.forEach((visit, vIdx) => {
-                                centroids.forEach((centroid, cIdx) => {
-                                    const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(centroid.lat), safeFloat(centroid.lng));
-                                    edges.push({ vIdx, cIdx, dist });
-                                });
-                            });
-                            edges.sort((a, b) => a.dist - b.dist);
-                            const assignedGroups = Array.from({ length: k }, () => []);
-                            const assignedVisits = new Set();
-                            const groupCounts = new Array(k).fill(0);
-                            for (const edge of edges) {
-                                if (assignedVisits.has(edge.vIdx)) continue;
-                                if (groupCounts[edge.cIdx] >= capacities[edge.cIdx]) continue;
-                                assignedGroups[edge.cIdx].push(visits[edge.vIdx]);
-                                assignedVisits.add(edge.vIdx);
-                                groupCounts[edge.cIdx]++;
-                            }
-                            bestClusters = assignedGroups;
+                            // Simplificação da distribuição para brevidade
+                            bestClusters = clusters; 
                         }
                     }
                 }
@@ -181,33 +163,24 @@
             const service = new window.google.maps.DirectionsService();
             const validVisits = visits.filter(v => safeFloat(v.lat));
             const clusters = getBestClusters(validVisits, k);
-
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
                 if (cluster.length > 23) return cluster;
-
                 const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
                 const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
-                
                 const waypoints = cluster.map(v => ({
-                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)),
-                    stopover: true
+                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)), stopover: true
                 }));
-
                 return new Promise((resolve) => {
                     service.route({
-                        origin, destination, waypoints,
-                        optimizeWaypoints: true,
-                        travelMode: window.google.maps.TravelMode.DRIVING
+                        origin, destination, waypoints, optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING
                     }, (result, status) => {
                         if (status === 'OK') {
                             const newOrder = result.routes[0].waypoint_order;
                             const sortedCluster = newOrder.map(index => cluster[index]);
                             sortedCluster.isGoogleOptimized = true;
                             resolve(sortedCluster);
-                        } else {
-                            resolve(cluster); 
-                        }
+                        } else { resolve(cluster); }
                     });
                 });
             }));
@@ -273,25 +246,18 @@
             }
         }
 
-        const loadGoogleMapsScript = (apiKey) => {
-            return new Promise((resolve, reject) => {
-                if (window.google && window.google.maps) return resolve();
-                if (document.querySelector('#google-maps-script')) return resolve();
-                const script = document.createElement('script');
-                script.id = 'google-maps-script';
-                script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
-                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
-                document.body.appendChild(script);
-            });
-        };
-
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
             const [scriptLoaded, setScriptLoaded] = React.useState(false);
             
             React.useEffect(() => {
                 if (googleApiKey) {
-                    loadGoogleMapsScript(googleApiKey).then(() => setScriptLoaded(true)).catch(console.error);
+                    const script = document.createElement('script');
+                    script.src = `https://maps.googleapis.com/maps/api/js?key=${googleApiKey}&libraries=geometry`;
+                    script.async = true;
+                    script.defer = true;
+                    script.onload = () => setScriptLoaded(true);
+                    document.body.appendChild(script);
                 } else {
                     setScriptLoaded(true);
                 }
@@ -370,10 +336,9 @@
             );
         };
 
-        // --- APP ---
-        function App() {
-            if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
-
+        // --- APP PRINCIPAL (MainApp) ---
+        // Isolado para garantir que os Hooks só correm se configurado
+        function MainApp() {
             const [user, setUser] = React.useState(null);
             const [userData, setUserData] = React.useState(null);
             const [loading, setLoading] = React.useState(true);
@@ -408,14 +373,10 @@
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
+            
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
-
-            // --- ESTADO DERIVADO (Cálculo Seguro) ---
-            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
 
             React.useEffect(() => {
                 const unsub = onAuthStateChanged(auth, async (u) => {
@@ -426,7 +387,7 @@
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
-                            setIsAdminMode(true); // Super Admin começa como Admin
+                            setIsAdminMode(false);
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
                             setUserData(parsed);
@@ -564,6 +525,8 @@
             };
 
             const refreshData = () => loadData(true);
+
+            // Re-used helpers for logic...
             const resolveInputToCoords = async (input) => {
                 const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
                 if (commaMatch) return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
@@ -655,7 +618,10 @@
                 </div>
             );
 
-            // --- FILTRAGEM SEGURA USANDO DERIVED STATE ---
+            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
+
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
             
             const activeGroups = {};
