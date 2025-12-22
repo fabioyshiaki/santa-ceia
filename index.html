@@ -33,9 +33,9 @@
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- 1. CONSTANTES E CONFIGURAÇÃO ---
-        const APP_VERSION = "12.5.0 (Structure Fix)";
+        const APP_VERSION = "12.5.1 (View Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const APP_ID = "santa-ceia-v1";
+        const appId = "santa-ceia-v1"; // Identificador fixo dos dados
 
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
@@ -45,6 +45,7 @@
   messagingSenderId: "506964180846",
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
+
 
         // --- 2. INICIALIZAÇÃO FIREBASE ---
         let app, auth, db;
@@ -58,8 +59,7 @@
             } catch (e) { console.error("Erro Firebase Init", e); }
         }
 
-        // --- 3. FUNÇÕES UTILITÁRIAS (TOP LEVEL) ---
-        // Definidas aqui para estarem garantidamente disponíveis para o componente App
+        // --- 3. FUNÇÕES UTILITÁRIAS ---
         const safeFloat = (val) => {
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.'));
@@ -139,7 +139,7 @@
                         });
                         if (totalVariance < bestScore) {
                             bestScore = totalVariance;
-                            // Distribuição Equilibrada
+                            // Balanced logic simplified
                             const baseSize = Math.floor(visits.length / k);
                             const remainder = visits.length % k;
                             const capacities = Array.from({ length: k }, (_, i) => baseSize + (i < remainder ? 1 : 0));
@@ -221,7 +221,7 @@
                 secondary: "bg-white text-slate-700 border border-slate-200",
                 success: "bg-emerald-600 text-white hover:bg-emerald-700",
                 danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100",
-                ghost: "bg-transparent text-slate-600"
+                ghost: "bg-transparent text-slate-600 hover:bg-slate-100"
             };
             return <button onClick={onClick} disabled={disabled} className={`flex items-center justify-center px-4 py-3 rounded-lg font-medium active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`}>{children}</button>;
         };
@@ -272,6 +272,18 @@
                 return this.props.children;
             }
         }
+
+        const loadGoogleMapsScript = (apiKey) => {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.maps) return resolve();
+                if (document.querySelector('#google-maps-script')) return resolve();
+                const script = document.createElement('script');
+                script.id = 'google-maps-script';
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
+                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
+                document.body.appendChild(script);
+            });
+        };
 
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
@@ -400,7 +412,7 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // --- 5. DERIVED STATE ---
+            // --- ESTADO DERIVADO (Cálculo Seguro) ---
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
@@ -414,7 +426,7 @@
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
-                            setIsAdminMode(false);
+                            setIsAdminMode(true); // Super Admin começa como Admin
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
                             setUserData(parsed);
@@ -896,6 +908,7 @@
                         </div>
                     )}
 
+                    {/* Other modals (Renew, Add) are standard... */}
                     {renewTarget && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
