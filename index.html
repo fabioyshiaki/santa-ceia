@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+    <!-- Ícone Pão e Vinho -->
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3652/3652191.png">
     <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIlNhbnRhIENlaWEgZG9zIEVuZmVybW9zIiwKICAic2hvcnRfbmFtZSI6ICJTYW50YSBDZWlhIiwKICAiZGVzY3JpcHRpb24iOiAiR2VzdMOjbyBkZSB2aXNpdGFzIHBhcmEgU2FudGEgQ2VpYSIsCiAgInRoZW1lX2NvbG9yIjogIiNmZmZmZmYiLAogICJiYWNrZ3JvdW5kX2NvbG9yIjogIiNmZmZmZmYiLAogICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLAogICJpY29ucyI6IFsKICAgIHsKICAgICAgInNyYyI6ICJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zNjUyLzM2NTIxOTEucG5nIiwKICAgICAgInNpemVzIjogIjUxMng1MTIiLAogICAgICAidHlwZSI6ICJpbWFnZS9wbmciCiAgICB9CiAgXQp9">
 
@@ -32,10 +33,12 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "12.0.0 (Pão & Vinho)";
+        // --- 1. CONFIGURAÇÃO E INICIALIZAÇÃO (NO TOPO PARA EVITAR ERROS) ---
+        const APP_VERSION = "12.0.1 (Hotfix Init)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
+        const appId = "santa-ceia-v1";
 
-        // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
+        // --- 🔴 CONFIGURAÇÃO DO FIREBASE (Coloque suas chaves aqui) ---
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -44,8 +47,158 @@
   messagingSenderId: "506964180846",
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
-        // ------------------------------------------------------------------
 
+        // Inicialização Segura
+        let app, auth, db;
+        const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
+
+        if (isConfigured) {
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            } catch (e) { console.error("Erro Firebase Init", e); }
+        }
+
+        // --- 2. FUNÇÕES AUXILIARES GLOBAIS ---
+        const safeFloat = (val) => {
+            if (!val) return 0;
+            return parseFloat(String(val).replace(',', '.'));
+        };
+
+        const getDistance = (lat1, lon1, lat2, lon2) => {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        };
+
+        const calculateExpiration = (durationString) => {
+            if (durationString === 'Permanente') return null;
+            const months = parseInt(durationString.split(' ')[0]);
+            if (isNaN(months)) return null;
+            const d = new Date();
+            d.setMonth(d.getMonth() + months);
+            return d.toISOString();
+        };
+
+        const isExpired = (visit) => {
+            if (!visit.expiresAt) return false;
+            return new Date() > new Date(visit.expiresAt);
+        };
+
+        const loadGoogleMapsScript = (apiKey) => {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.maps) return resolve();
+                if (document.querySelector('#google-maps-script')) return resolve();
+                const script = document.createElement('script');
+                script.id = 'google-maps-script';
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
+                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
+                document.body.appendChild(script);
+            });
+        };
+
+        // --- 3. ALGORITMOS DE ROTA ---
+        const optimizeRoutesFallback = (visits, k, startPoint) => {
+            const validVisits = visits.filter(v => safeFloat(v.lat));
+            const clusters = Array.from({ length: k }, () => []);
+            validVisits.forEach((v, i) => clusters[i % k].push(v));
+            return clusters;
+        };
+
+        const getBestClusters = (visits, k) => {
+            let bestClusters = [];
+            let bestScore = Infinity;
+
+            for (let t = 0; t < 50; t++) {
+                let centroids = [];
+                if (visits.length > 0) {
+                    for (let i = 0; i < k; i++) centroids.push(visits[Math.floor(Math.random() * visits.length)]);
+                }
+
+                for (let iter = 0; iter < 5; iter++) {
+                    const clusters = Array.from({ length: k }, () => []);
+                    visits.forEach(visit => {
+                        let minDistance = Infinity;
+                        let clusterIndex = 0;
+                        centroids.forEach((c, idx) => {
+                            const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(c.lat), safeFloat(c.lng));
+                            if (dist < minDistance) { minDistance = dist; clusterIndex = idx; }
+                        });
+                        clusters[clusterIndex].push(visit);
+                    });
+                    
+                    centroids = clusters.map((cluster, idx) => {
+                        if (cluster.length === 0) return centroids[idx]; 
+                        const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
+                        const sumLng = cluster.reduce((acc, v) => acc + safeFloat(v.lng), 0);
+                        return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
+                    });
+
+                    if (iter === 4) {
+                        let totalVariance = 0;
+                        clusters.forEach((cluster, idx) => {
+                            cluster.forEach(v => {
+                                totalVariance += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng);
+                            });
+                        });
+                        if (totalVariance < bestScore) {
+                            bestScore = totalVariance;
+                            bestClusters = clusters; // Simplified greedy
+                        }
+                    }
+                }
+            }
+            return bestClusters;
+        };
+
+        const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
+            if (!apiKey) return optimizeRoutesFallback(visits, k, startPoint);
+
+            await loadGoogleMapsScript(apiKey);
+            const service = new window.google.maps.DirectionsService();
+            const validVisits = visits.filter(v => safeFloat(v.lat));
+            
+            // 1. Agrupamento Robusto
+            const clusters = getBestClusters(validVisits, k);
+
+            // 2. Otimização Google
+            const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
+                if (cluster.length === 0) return [];
+                if (cluster.length > 23) return cluster;
+
+                const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
+                const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
+                
+                const waypoints = cluster.map(v => ({
+                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)),
+                    stopover: true
+                }));
+
+                return new Promise((resolve) => {
+                    service.route({
+                        origin, destination, waypoints,
+                        optimizeWaypoints: true,
+                        travelMode: window.google.maps.TravelMode.DRIVING
+                    }, (result, status) => {
+                        if (status === 'OK') {
+                            const newOrder = result.routes[0].waypoint_order;
+                            const sortedCluster = newOrder.map(index => cluster[index]);
+                            sortedCluster.isGoogleOptimized = true;
+                            resolve(sortedCluster);
+                        } else {
+                            resolve(cluster); 
+                        }
+                    });
+                });
+            }));
+            return optimizedClusters;
+        };
+
+        // --- 4. COMPONENTES VISUAIS ---
         const Icons = {
             Users: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
             MapPin: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>,
@@ -91,137 +244,94 @@
             }
         }
 
-        // ... [loadGoogleMapsScript, EmbeddedMap, safeFloat, getDistance, optimizeRoutesGoogle, optimizeRoutesFallback, calculateExpiration, isExpired maintained from v11.1.0] ...
-        // INCLUIR AQUI AS FUNÇÕES AUXILIARES QUE JÁ EXISTIAM NA VERSÃO 11.1.0 (optimizeRoutesGoogle, etc.)
-        // Para brevidade, estou usando as mesmas lógicas, mas focando nas novas UIs abaixo.
-        const safeFloat = (val) => {
-            if (!val) return 0;
-            return parseFloat(String(val).replace(',', '.'));
-        };
-        const getDistance = (lat1, lon1, lat2, lon2) => {
-            const R = 6371; 
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
-        };
-        const loadGoogleMapsScript = (apiKey) => {
-            return new Promise((resolve, reject) => {
-                if (window.google && window.google.maps) return resolve();
-                if (document.querySelector('#google-maps-script')) return resolve();
-                const script = document.createElement('script');
-                script.id = 'google-maps-script';
-                script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
-                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
-                document.body.appendChild(script);
-            });
-        };
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
             const [scriptLoaded, setScriptLoaded] = React.useState(false);
+            
             React.useEffect(() => {
-                if (googleApiKey) { loadGoogleMapsScript(googleApiKey).then(() => setScriptLoaded(true)).catch(console.error); } else { setScriptLoaded(true); }
+                if (googleApiKey) {
+                    loadGoogleMapsScript(googleApiKey).then(() => setScriptLoaded(true)).catch(console.error);
+                } else {
+                    setScriptLoaded(true);
+                }
             }, [googleApiKey]);
+
             React.useEffect(() => {
                 if (!scriptLoaded || !mapContainerRef.current) return;
-                const center = churchLocation ? [safeFloat(churchLocation.lat), safeFloat(churchLocation.lng)] : [0,0];
+                
                 if (googleApiKey && window.google) {
-                    const map = new window.google.maps.Map(mapContainerRef.current, { center: { lat: center[0], lng: center[1] }, zoom: 13, disableDefaultUI: false });
+                    const startLat = churchLocation ? safeFloat(churchLocation.lat) : safeFloat(visits[0]?.lat);
+                    const startLng = churchLocation ? safeFloat(churchLocation.lng) : safeFloat(visits[0]?.lng);
+                    const map = new window.google.maps.Map(mapContainerRef.current, {
+                        center: { lat: startLat, lng: startLng }, zoom: 13, disableDefaultUI: false
+                    });
+
                     const points = [];
                     if (churchLocation) points.push({ pos: churchLocation, title: "Igreja", color: "blue" });
                     visits.forEach((v, i) => { if(v.lat) points.push({ pos: v, title: `${i+1}. ${v.name}`, color: "green" }); });
                     if (pastorLocation) points.push({ pos: pastorLocation, title: "Pastor", color: "red" });
+
                     if (points.length > 1) {
                          const directionsService = new window.google.maps.DirectionsService();
                          const directionsRenderer = new window.google.maps.DirectionsRenderer({ map, suppressMarkers: false });
                          const origin = new window.google.maps.LatLng(safeFloat(points[0].pos.lat), safeFloat(points[0].pos.lng));
                          const destination = new window.google.maps.LatLng(safeFloat(points[points.length-1].pos.lat), safeFloat(points[points.length-1].pos.lng));
-                         const waypoints = points.slice(1, -1).map(p => ({ location: new window.google.maps.LatLng(safeFloat(p.pos.lat), safeFloat(p.pos.lng)), stopover: true }));
-                         directionsService.route({ origin, destination, waypoints, travelMode: window.google.maps.TravelMode.DRIVING }, (res, status) => { if (status === 'OK') directionsRenderer.setDirections(res); });
+                         const waypoints = points.slice(1, -1).map(p => ({
+                             location: new window.google.maps.LatLng(safeFloat(p.pos.lat), safeFloat(p.pos.lng)),
+                             stopover: true
+                         }));
+                         directionsService.route({
+                             origin, destination, waypoints,
+                             travelMode: window.google.maps.TravelMode.DRIVING
+                         }, (res, status) => { if (status === 'OK') directionsRenderer.setDirections(res); });
                     }
                     return;
                 }
+
+                const center = churchLocation ? [churchLocation.lat, churchLocation.lng] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
                 const map = L.map(mapContainerRef.current).setView(center, 13);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
-                const createIcon = (color, html) => L.divIcon({ className: 'custom-icon', html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+
+                const createIcon = (color, html) => L.divIcon({
+                    className: 'custom-icon',
+                    html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`,
+                    iconSize: [30, 30], iconAnchor: [15, 15]
+                });
+
                 const latlngs = [];
-                if (churchLocation && churchLocation.lat) { L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') }).addTo(map).bindPopup("<b>Início</b>"); latlngs.push([churchLocation.lat, churchLocation.lng]); }
-                visits.forEach((v, idx) => { if (v.lat && v.lng) { L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) }).addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`); latlngs.push([v.lat, v.lng]); } });
-                if (pastorLocation && pastorLocation.lat) { L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') }).addTo(map).bindPopup("<b>Fim</b>"); latlngs.push([pastorLocation.lat, pastorLocation.lng]); }
-                if (latlngs.length > 1) { const polyline = L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map); map.fitBounds(polyline.getBounds(), { padding: [50, 50] }); }
+                if (churchLocation && churchLocation.lat) {
+                    L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') }).addTo(map).bindPopup("<b>Início: Igreja</b>");
+                    latlngs.push([churchLocation.lat, churchLocation.lng]);
+                }
+                visits.forEach((v, idx) => {
+                    if (v.lat && v.lng) {
+                        L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) }).addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`);
+                        latlngs.push([v.lat, v.lng]);
+                    }
+                });
+                if (pastorLocation && pastorLocation.lat) {
+                    L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') }).addTo(map).bindPopup("<b>Fim</b>");
+                    latlngs.push([pastorLocation.lat, pastorLocation.lng]);
+                }
+                if (latlngs.length > 1) {
+                    const polyline = L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map);
+                    map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+                }
                 return () => map.remove();
             }, [scriptLoaded, visits, churchLocation, pastorLocation, googleApiKey]);
-            return (<div className="fixed inset-0 bg-white z-50 flex flex-col"><div className="bg-white p-4 border-b flex justify-between items-center shadow-sm z-10"><h3 className="font-bold text-slate-800">Mapa</h3><button onClick={onClose} className="bg-slate-100 p-2 rounded-full">✕</button></div><div ref={mapContainerRef} className="flex-1 bg-slate-100 h-full w-full"></div></div>);
-        };
-        // ------------------------------------
 
-        const optimizeRoutesFallback = (visits, k, startPoint) => {
-            const validVisits = visits.filter(v => safeFloat(v.lat));
-            const clusters = Array.from({ length: k }, () => []);
-            validVisits.forEach((v, i) => clusters[i % k].push(v));
-            return clusters;
-        };
-
-        const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
-            if (!apiKey) return optimizeRoutesFallback(visits, k, startPoint);
-            await loadGoogleMapsScript(apiKey);
-            const service = new window.google.maps.DirectionsService();
-            const validVisits = visits.filter(v => safeFloat(v.lat));
-            let centroids = [];
-            for (let i = 0; i < k; i++) centroids.push(validVisits[Math.floor((i/k)*validVisits.length)]);
-            let clusters = Array.from({ length: k }, () => []);
-            validVisits.forEach(v => {
-                 let min = Infinity, idx = 0;
-                 centroids.forEach((c, i) => { const d = getDistance(safeFloat(v.lat), safeFloat(v.lng), safeFloat(c.lat), safeFloat(c.lng)); if(d < min) { min = d; idx = i; } });
-                 clusters[idx].push(v);
-            });
-            const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
-                if (cluster.length === 0) return [];
-                if (cluster.length > 23) return cluster;
-                const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
-                const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
-                const waypoints = cluster.map(v => ({ location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)), stopover: true }));
-                return new Promise((resolve) => {
-                    service.route({ origin, destination, waypoints, optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => {
-                        if (status === 'OK') {
-                            const newOrder = result.routes[0].waypoint_order;
-                            const sortedCluster = newOrder.map(index => cluster[index]);
-                            sortedCluster.isGoogleOptimized = true;
-                            resolve(sortedCluster);
-                        } else { resolve(cluster); }
-                    });
-                });
-            }));
-            return optimizedClusters;
+            return (
+                <div className="fixed inset-0 bg-white z-50 flex flex-col">
+                    <div className="bg-white p-4 border-b flex justify-between items-center shadow-sm z-10">
+                        <h3 className="font-bold text-slate-800">Mapa da Rota</h3>
+                        <button onClick={onClose} className="bg-slate-100 p-2 rounded-full text-slate-600">✕</button>
+                    </div>
+                    <div ref={mapContainerRef} className="flex-1 bg-slate-100 h-full w-full"></div>
+                </div>
+            );
         };
 
-        const calculateExpiration = (durationString) => {
-            if (durationString === 'Permanente') return null;
-            const months = parseInt(durationString.split(' ')[0]);
-            if (isNaN(months)) return null;
-            const d = new Date();
-            d.setMonth(d.getMonth() + months);
-            return d.toISOString();
-        };
-
-        const isExpired = (visit) => {
-            if (!visit.expiresAt) return false;
-            return new Date() > new Date(visit.expiresAt);
-        };
-
-        const Badge = ({ children, color }) => <span className={`px-2 py-1 rounded-full text-xs font-bold ${color}`}>{children}</span>;
-        const Button = ({ onClick, children, variant = 'primary', className = '', disabled=false }) => {
-            const variants = {
-                primary: "bg-blue-700 text-white hover:bg-blue-800",
-                secondary: "bg-white text-slate-700 border border-slate-200",
-                success: "bg-emerald-600 text-white hover:bg-emerald-700",
-                danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100",
-                ghost: "bg-transparent text-slate-600"
-            };
-            return <button onClick={onClick} disabled={disabled} className={`flex items-center justify-center px-4 py-3 rounded-lg font-medium active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`}>{children}</button>;
-        };
-
+        // --- APP ---
         function App() {
             if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
 
@@ -236,7 +346,7 @@
 
             // Data State
             const [visits, setVisits] = React.useState([]);
-            const [usersList, setUsersList] = React.useState([]); // For Team Management
+            const [usersList, setUsersList] = React.useState([]);
             const [churchLocation, setChurchLocation] = React.useState(null);
             const [pastorLocation, setPastorLocation] = React.useState(null);
             const [googleApiKey, setGoogleApiKey] = React.useState(null);
@@ -244,16 +354,18 @@
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             const [isOptimizing, setIsOptimizing] = React.useState(false);
             
+            // Map State
             const [showMap, setShowMap] = React.useState(false);
             const [mapData, setMapData] = React.useState([]);
 
+            // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
             const [newAddress, setNewAddress] = React.useState('');
             const [newDuration, setNewDuration] = React.useState('1 Mês (Temporário)');
             const [modalOpen, setModalOpen] = React.useState(false);
             const [configModalOpen, setConfigModalOpen] = React.useState(false);
-            const [teamModalOpen, setTeamModalOpen] = React.useState(false); // NEW
+            const [teamModalOpen, setTeamModalOpen] = React.useState(false);
             const [renewTarget, setRenewTarget] = React.useState(null);
             const [renewDuration, setRenewDuration] = React.useState('1 Mês (Temporário)');
             const [splitCount, setSplitCount] = React.useState(2);
@@ -274,7 +386,7 @@
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
-                            setIsAdminMode(false); // Starts as Presbitero
+                            setIsAdminMode(false);
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
                             setUserData(parsed);
@@ -345,6 +457,7 @@
                     list.sort((a,b) => (a.orderIndex||999) - (b.orderIndex||999));
                     
                     const batchCleanup = [];
+                    let cleanupNeeded = false;
                     list.forEach(v => {
                         if (v.assignedGroup && v.assignmentDate) {
                             const assignDate = new Date(v.assignmentDate);
@@ -353,18 +466,17 @@
                                     assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null
                                 }));
                                 v.assignedTo = null; v.assignedGroup = null;
+                                cleanupNeeded = true;
                             }
                         }
                     });
                     
-                    if (batchCleanup.length > 0) await Promise.all(batchCleanup);
+                    if (cleanupNeeded && batchCleanup.length > 0) await Promise.all(batchCleanup);
 
                     const churchSnap = await getDoc(doc(db, 'artifacts', appId, 'settings', 'church_config'));
                     const churchData = churchSnap.exists() ? churchSnap.data() : null;
-
                     const pastorSnap = await getDoc(doc(db, 'artifacts', appId, 'settings', 'pastor_config'));
                     const pastorData = pastorSnap.exists() ? pastorSnap.data() : null;
-                    
                     const apiSnap = await getDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'));
                     const apiKeyData = apiSnap.exists() ? apiSnap.data().googleMaps : null;
 
@@ -378,7 +490,6 @@
                     localStorage.setItem(cacheKey, JSON.stringify({
                         date: today, timestamp: nowStr, visits: list, church: churchData, pastor: pastorData, apiKey: apiKeyData
                     }));
-
                 } catch (e) { console.error("Erro dados", e); }
                 setLoading(false);
             };
@@ -404,17 +515,13 @@
                 setIsAdminMode(data.role === 'pastor');
             };
 
-            // NEW: Toggle User Permission
             const handleToggleGPSPermission = async (targetUid, currentStatus) => {
-                if (!confirm("Alterar permissão de GPS para este utilizador?")) return;
+                if (!confirm("Alterar permissão de GPS?")) return;
                 await updateDoc(doc(db, 'artifacts', appId, 'users', targetUid), { canEditGPS: !currentStatus });
-                // Update local state list
                 setUsersList(prev => prev.map(u => u.uid === targetUid ? {...u, canEditGPS: !currentStatus} : u));
             };
 
             const refreshData = () => loadData(true);
-
-            // Helpers
             const resolveInputToCoords = async (input) => {
                 const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
                 if (commaMatch) return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
@@ -456,13 +563,10 @@
             const saveApiKey = async () => { await setDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'), { googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
             const handleSmartDivide = async () => { setIsOptimizing(true); const clusters = await optimizeRoutesGoogle(visits, splitCount, churchLocation, pastorLocation, googleApiKey); setOptimizedGroups(clusters); setIsOptimizing(false); };
-            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: gIdx+1, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
-            const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro ${groupId}?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
+            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); const currentMonth = new Date().toLocaleString('pt-PT', { month: 'long' }); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: `${gIdx+1} - ${currentMonth}`, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
+            const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
             const handleShowInternalMap = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); setMapData(toVisit); setShowMap(true); };
-            const openSingleMap = (lat, lng) => {
-                 if (lat && lng) window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`, '_blank');
-                 else alert("Sem GPS");
-            };
+            const openSingleMap = (lat, lng) => { if (lat && lng) window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`, '_blank'); else alert("Sem GPS"); };
             const openMaps = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); const validPoints = toVisit.filter(v => safeFloat(v.lat) && safeFloat(v.lng)); if (validPoints.length === 0) return alert("Sem GPS."); const sorted = [...validPoints].sort((a,b) => (a.orderIndex||0)-(b.orderIndex||0)); const coordsList = []; if (churchLocation) coordsList.push(`${safeFloat(churchLocation.lat)},${safeFloat(churchLocation.lng)}`); sorted.forEach(v => coordsList.push(`${safeFloat(v.lat)},${safeFloat(v.lng)}`)); if (pastorLocation) coordsList.push(`${safeFloat(pastorLocation.lat)},${safeFloat(pastorLocation.lng)}`); window.open(`https://www.google.com/maps/dir/${coordsList.join('/')}`, '_blank'); };
 
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
@@ -510,11 +614,16 @@
             );
 
             const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
-            const canSeeGPS = isAdminMode || userData.canEditGPS;
-            const myVisits = isAdminMode ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
+            // Se for superadmin e tiver modo admin ativado OU se for pastor, vê tudo
+            // Se não, vê apenas o que está atribuído ao nome
+            const myVisits = (isSuperAdmin && isAdminMode) || userData.role === 'pastor' 
+                ? visits 
+                : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
             
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData.role === 'pastor' || userData.canEditGPS;
+
             const activeGroups = {};
-            if (isAdminMode) {
+            if (isPastor || (isSuperAdmin && isAdminMode)) {
                 visits.forEach(v => {
                     if (v.assignedGroup && v.assignedTo) {
                         if (!activeGroups[v.assignedGroup]) activeGroups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
@@ -549,13 +658,13 @@
                         </div>
                         <div className="flex gap-2 ml-2">
                             <button onClick={refreshData} className="p-2 bg-blue-100 text-blue-700 rounded-full shadow-sm border-2 border-blue-200"><Icons.CloudDownload /></button>
-                            {isAdminMode && <button onClick={()=>setTeamModalOpen(true)} className="p-2 bg-indigo-100 text-indigo-700 rounded-full shadow-sm border-2 border-indigo-200 font-bold text-xs flex items-center justify-center">EQP</button>}
-                            {isAdminMode && <button onClick={()=>setConfigModalOpen(true)} className="p-2 bg-slate-100 rounded-full"><Icons.Settings /></button>}
+                            {(isPastor || (isSuperAdmin && isAdminMode)) && <button onClick={()=>setTeamModalOpen(true)} className="p-2 bg-indigo-100 text-indigo-700 rounded-full shadow-sm border-2 border-indigo-200 font-bold text-xs flex items-center justify-center">EQP</button>}
+                            {(isPastor || (isSuperAdmin && isAdminMode)) && <button onClick={()=>setConfigModalOpen(true)} className="p-2 bg-slate-100 rounded-full"><Icons.Settings /></button>}
                             <button onClick={()=>{localStorage.clear(); signOut(auth); window.location.reload()}} className="p-2 bg-red-50 text-red-500 rounded-full"><Icons.LogOut /></button>
                         </div>
                     </header>
                     
-                    {isAdminMode && (
+                    {(isPastor || (isSuperAdmin && isAdminMode)) && (
                         <div className="flex p-2 gap-2 bg-slate-50 border-b">
                             <button onClick={() => setActiveTab('list')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'list' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:bg-slate-200'}`}>Lista Geral</button>
                             <button onClick={() => setActiveTab('manage')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${activeTab === 'manage' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:bg-slate-200'}`}>Roteiros</button>
@@ -563,7 +672,7 @@
                     )}
 
                     <main className="max-w-xl mx-auto p-4 space-y-6">
-                        {isAdminMode && activeTab === 'manage' && (
+                        {(isPastor || (isSuperAdmin && isAdminMode)) && activeTab === 'manage' && (
                             <div className="space-y-6 animate-in fade-in">
                                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                                     <h2 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><Icons.Split /> Criar Roteiros {googleApiKey ? '⚡ Google' : '(Offline)'}</h2>
@@ -581,7 +690,7 @@
                                             <div key={i} className="bg-white border-2 border-slate-200 rounded-xl overflow-hidden shadow-sm">
                                                 <div className="bg-slate-50 p-3 border-b space-y-2">
                                                     <div className="flex justify-between items-center">
-                                                        <span className="font-bold text-blue-800">Roteiro {i+1} - {new Date().toLocaleString('pt-PT', { month: 'long' })}</span>
+                                                        <span className="font-bold text-blue-800">Roteiro {i+1} ({g.length})</span>
                                                         <div className="flex gap-1">
                                                             {googleApiKey && <button onClick={() => reoptimizeGroup(i, g)} className="text-xs flex items-center gap-1 bg-yellow-50 border border-yellow-200 px-2 py-1 rounded text-yellow-700"><Icons.Lightning size={12}/> Otimizar</button>}
                                                             <button onClick={() => openMaps(g)} className="text-xs flex items-center gap-1 bg-blue-50 border border-blue-200 px-2 py-1 rounded text-blue-700"><Icons.Navigation size={12}/> Testar</button>
@@ -639,7 +748,7 @@
 
                         {activeTab === 'list' && (
                             <div className="space-y-4">
-                                {!isAdminMode && myVisits.length > 0 && (
+                                {!(isPastor || (isSuperAdmin && isAdminMode)) && myVisits.length > 0 && (
                                     <div className="bg-emerald-600 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden">
                                         <div className="absolute top-0 right-0 opacity-10 translate-x-4 -translate-y-4"><Icons.Navigation size={100}/></div>
                                         <h3 className="font-bold">Seu Roteiro</h3>
@@ -651,8 +760,8 @@
                                     </div>
                                 )}
                                 <div className="flex justify-between items-center px-1">
-                                    <h2 className="font-bold text-slate-700">{isAdminMode ? 'Cadastro Geral' : 'Minhas Visitas'}</h2>
-                                    {isAdminMode && <Button onClick={()=>setModalOpen(true)} className="py-1 px-3 text-sm rounded-full"><Icons.UserPlus /> Novo</Button>}
+                                    <h2 className="font-bold text-slate-700">{(isPastor || (isSuperAdmin && isAdminMode)) ? 'Cadastro Geral' : 'Minhas Visitas'}</h2>
+                                    {(isPastor || (isSuperAdmin && isAdminMode)) && <Button onClick={()=>setModalOpen(true)} className="py-1 px-3 text-sm rounded-full"><Icons.UserPlus /> Novo</Button>}
                                 </div>
                                 <div className="grid gap-3">
                                     {myVisits.map((v, i) => {
@@ -660,14 +769,14 @@
                                         const isChecked = v.attendedChurch === true;
                                         return (
                                             <div key={v.id} className={`p-4 rounded-xl border shadow-sm relative transition-all ${isChecked ? 'bg-green-50 border-green-200 opacity-75' : (expired ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100')}`}>
-                                                {!isAdminMode && <div className="absolute top-4 left-4 w-6 h-6 bg-slate-800 text-white rounded-full flex items-center justify-center text-xs font-bold">{i+1}</div>}
-                                                <div className={!isAdminMode ? 'pl-8' : ''}>
+                                                {!(isPastor || (isSuperAdmin && isAdminMode)) && <div className="absolute top-4 left-4 w-6 h-6 bg-slate-800 text-white rounded-full flex items-center justify-center text-xs font-bold">{i+1}</div>}
+                                                <div className={!(isPastor || (isSuperAdmin && isAdminMode)) ? 'pl-8' : ''}>
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <h3 className={`font-bold flex items-center gap-2 ${isChecked ? 'text-green-700 line-through' : (expired ? 'text-red-700' : '')}`}>{v.name} {isChecked && <Icons.CheckCircle size={16} />}</h3>
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
-                                                        {isAdminMode && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
+                                                        {(isPastor || (isSuperAdmin && isAdminMode)) && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
                                                     </div>
                                                     <div className="mt-2 mb-2">
                                                         <label className="flex items-center space-x-2 text-sm font-medium text-slate-600 cursor-pointer w-max p-1 hover:bg-slate-100 rounded">
@@ -690,7 +799,7 @@
                                                                 <button onClick={()=>updateGPS(v.id)} className={`flex-1 py-2 rounded text-xs font-medium flex items-center justify-center gap-1 ${v.lat ? 'bg-green-50 text-green-700':'bg-blue-50 text-blue-600'}`}>{v.lat ? <Icons.CheckCircle size={14}/> : <Icons.MapPin size={14}/>} GPS</button>
                                                             </>
                                                         )}
-                                                        {expired && isAdminMode && <Button onClick={()=>setRenewTarget(v.id)} variant="success" className="flex-1 text-xs py-2"><Icons.Refresh size={14} className="mr-1"/> Renovar</Button>}
+                                                        {expired && (isPastor || (isSuperAdmin && isAdminMode)) && <Button onClick={()=>setRenewTarget(v.id)} variant="success" className="flex-1 text-xs py-2"><Icons.Refresh size={14} className="mr-1"/> Renovar</Button>}
                                                     </div>
                                                 </div>
                                             </div>
@@ -702,13 +811,11 @@
                         )}
                     </main>
 
-                    {/* MODAL GESTÃO EQUIPA (NOVO) */}
+                    {/* MODAL GESTÃO EQUIPA */}
                     {teamModalOpen && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto">
                                 <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Users/> Gestão de Equipa</h3>
-                                <p className="text-xs text-slate-500 mb-4">Ative quem pode ver e editar coordenadas GPS.</p>
-                                
                                 <div className="space-y-4">
                                     <h4 className="font-bold text-xs text-blue-800 uppercase border-b pb-1">Presbíteros</h4>
                                     {availableOfficers.presbiteros.map(u => (
@@ -765,7 +872,6 @@
                                             <input className="flex-1 text-xs p-2 border rounded" type="password" placeholder="Cole sua API Key..." value={editApiKey} onChange={e => setEditApiKey(e.target.value)}/>
                                             <button onClick={() => {saveApiKey(); setEditApiKey('')}} className="bg-green-600 text-white text-xs px-3 rounded font-bold">Salvar</button>
                                         </div>
-                                        <p className="text-[10px] text-slate-400 mt-1">Necessário para otimização inteligente de rotas.</p>
                                     </div>
                                 </div>
                                 <Button onClick={()=>setConfigModalOpen(false)} variant="ghost" className="w-full mt-6">Fechar</Button>
