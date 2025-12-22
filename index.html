@@ -27,15 +27,36 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
     
-    <!-- Sistema de Diagnóstico de Erro Global -->
+    <!-- Sistema de Diagnóstico de Erro Global com Cópia -->
     <script>
         window.onerror = function(message, source, lineno, colno, error) {
             const root = document.getElementById('root');
-            root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
-                             '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Ocorreu um erro</h2>' +
-                             '<p style="font-size:14px; margin-bottom:20px;">' + message + '</p>' +
-                             '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold;">Reiniciar Aplicação</button>' +
-                             '</div>';
+            const errorText = "Erro: " + message + "\nFonte: " + source + "\nLinha: " + lineno;
+            
+            // Função de cópia compatível (execCommand)
+            window.copyError = function() {
+                var textArea = document.createElement("textarea");
+                textArea.value = errorText;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    alert('Erro copiado! Cole no chat.');
+                } catch (err) {
+                    alert('Não foi possível copiar automaticamente.');
+                }
+                document.body.removeChild(textArea);
+            };
+
+            if(root) {
+                root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
+                                 '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Ocorreu um erro crítico</h2>' +
+                                 '<p style="font-size:14px; margin-bottom:20px; background:#fee2e2; padding:10px; border-radius:5px; word-break:break-word;">' + message + '</p>' +
+                                 '<div style="display:flex; gap:10px; justify-content:center;">' +
+                                 '<button onclick="window.copyError()" style="background:#fff; border:1px solid #b91c1c; color:#b91c1c; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Copiar Erro</button>' +
+                                 '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Reiniciar App</button>' +
+                                 '</div></div>';
+            }
         };
     </script>
 
@@ -45,9 +66,9 @@
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- 1. CONSTANTES ---
-        const APP_VERSION = "12.7.1 (Crash Fix)";
+        const APP_VERSION = "12.8.0 (Error Copy)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const APP_ID = "santa-ceia-v1"; // ID corrigido para evitar perda de dados
+        const APP_ID = "santa-ceia-v1"; // ID corrigido
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
@@ -240,8 +261,16 @@
                     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-red-50 text-red-900 text-center">
                         <Icons.Alert />
                         <h1 className="text-xl font-bold mt-4">Algo correu mal</h1>
-                        <p className="text-sm mt-2 mb-6 opacity-80">{this.state.error?.message}</p>
-                        <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg">Reiniciar App</button>
+                        <p className="text-sm mt-2 mb-6 opacity-80 bg-red-100 p-2 rounded">{this.state.error?.message}</p>
+                        <div className="flex gap-2 justify-center mt-4">
+                            <button onClick={() => {
+                                const ta = document.createElement("textarea");
+                                ta.value = this.state.error?.message;
+                                document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+                                alert("Erro copiado!");
+                            }} className="bg-white border border-red-500 text-red-500 px-4 py-2 rounded-lg font-bold">Copiar Erro</button>
+                            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-600 text-white px-4 py-2 rounded-xl font-bold shadow-lg">Reiniciar App</button>
+                        </div>
                     </div>
                 );
                 return this.props.children;
@@ -393,8 +422,17 @@
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
 
-            // FIX: PROTEÇÃO DE VARIAVEL NULL
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
+            
+            const activeGroups = {};
+            if (isPastor) {
+                visits.forEach(v => {
+                    if (v.assignedGroup && v.assignedTo) {
+                        if (!activeGroups[v.assignedGroup]) activeGroups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
+                        activeGroups[v.assignedGroup].count++;
+                    }
+                });
+            }
 
             React.useEffect(() => {
                 const unsub = onAuthStateChanged(auth, async (u) => {
@@ -405,7 +443,8 @@
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
-                            setIsAdminMode(true); 
+                            setIsAdminMode(false);
+                            // Ensure Super Admin is saved in DB for team selection
                             await setDoc(doc(db, 'artifacts', appId, 'users', u.uid), adminProfile); 
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
@@ -742,7 +781,6 @@
                                                             <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold">{g.isGoogleOptimized ? 'G' : idx+1}</span>
                                                             <div className="truncate">
                                                                 <span className="text-sm font-medium">{v.name}</span>
-                                                                <div className="text-[10px] text-slate-400 font-mono">{v.duration}</div>
                                                             </div>
                                                         </li>
                                                     ))}
@@ -939,7 +977,7 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
     </script>
 </body>
 </html>
