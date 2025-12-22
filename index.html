@@ -26,6 +26,18 @@
 </head>
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
+    
+    <!-- Sistema de Diagnóstico de Erro Global -->
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            const root = document.getElementById('root');
+            root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
+                             '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Ocorreu um erro</h2>' +
+                             '<p style="font-size:14px; margin-bottom:20px;">' + message + '</p>' +
+                             '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold;">Reiniciar Aplicação</button>' +
+                             '</div>';
+        };
+    </script>
 
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -33,9 +45,9 @@
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- 1. CONSTANTES ---
-        const APP_VERSION = "12.6.2 (Data Restore)";
+        const APP_VERSION = "12.7.0 (Safe)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const appId = "santa-ceia-v1"; // CORRIGIDO: Nome da variável restaurado
+        const appId = "santa-ceia-v1"; 
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
@@ -236,18 +248,6 @@
             }
         }
 
-        const loadGoogleMapsScript = (apiKey) => {
-            return new Promise((resolve, reject) => {
-                if (window.google && window.google.maps) return resolve();
-                if (document.querySelector('#google-maps-script')) return resolve();
-                const script = document.createElement('script');
-                script.id = 'google-maps-script';
-                script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
-                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
-                document.body.appendChild(script);
-            });
-        };
-
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
             const [scriptLoaded, setScriptLoaded] = React.useState(false);
@@ -335,8 +335,7 @@
 
         // --- APP ---
         function App() {
-            if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
-
+            // DECLARAÇÃO DE HOOKS NO INÍCIO (SEMPRE)
             const [user, setUser] = React.useState(null);
             const [userData, setUserData] = React.useState(null);
             const [loading, setLoading] = React.useState(true);
@@ -346,7 +345,6 @@
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
 
-            // Data State
             const [visits, setVisits] = React.useState([]);
             const [usersList, setUsersList] = React.useState([]);
             const [churchLocation, setChurchLocation] = React.useState(null);
@@ -356,11 +354,9 @@
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             const [isOptimizing, setIsOptimizing] = React.useState(false);
             
-            // Map State
             const [showMap, setShowMap] = React.useState(false);
             const [mapData, setMapData] = React.useState([]);
 
-            // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
             const [newAddress, setNewAddress] = React.useState('');
@@ -374,17 +370,13 @@
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
-            
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // --- 5. DERIVED STATE ---
-            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
-
+            // EFEITO DE AUTH
             React.useEffect(() => {
+                if (!auth) return; // Proteção contra falha no Firebase
                 const unsub = onAuthStateChanged(auth, async (u) => {
                     setUser(u);
                     if (u) {
@@ -417,8 +409,10 @@
                 return () => unsub();
             }, []);
 
+            // EFEITO DE DADOS
             React.useEffect(() => {
                 if (isAdminMode || (user?.email === SUPER_ADMIN_EMAIL)) {
+                    if (!db) return;
                     const fetchOfficers = async () => {
                         try {
                             const q = query(collection(db, 'artifacts', appId, 'users'));
@@ -435,8 +429,14 @@
                 }
             }, [isAdminMode, user]);
 
+            React.useEffect(() => { if (user) loadData(); }, [user]);
+
+            // CONDICIONAIS DE RENDERIZAÇÃO NO FIM
+            if (!isConfigured) return <div className="p-10 text-center text-red-600 font-bold">⚠️ Erro: Chaves do Firebase não configuradas.</div>;
+            if (!auth) return <div className="p-10 text-center text-red-600 font-bold">⚠️ Erro: Falha ao ligar ao servidor.</div>;
+
             const loadData = async (force = false) => {
-                if (!user) return;
+                if (!user || !db) return;
                 setLoading(true);
 
                 const today = new Date().toISOString().split('T')[0];
@@ -463,10 +463,11 @@
                     const list = querySnapshot.docs.map(d => ({id: d.id, ...d.data()}));
                     list.sort((a,b) => (a.orderIndex||999) - (b.orderIndex||999));
                     
+                    // Auto Clean logic ...
                     const batchCleanup = [];
                     let cleanupNeeded = false;
                     list.forEach(v => {
-                        if (v.assignedGroup && v.assignmentDate) {
+                         if (v.assignedGroup && v.assignmentDate) {
                             const assignDate = new Date(v.assignmentDate);
                             if (now.getMonth() !== assignDate.getMonth() || now.getFullYear() !== assignDate.getFullYear()) {
                                 batchCleanup.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), {
@@ -502,8 +503,6 @@
                 } catch (e) { console.error("Erro dados", e); }
                 setLoading(false);
             };
-
-            React.useEffect(() => { if (user) loadData(); }, [user]);
 
             const handleAuth = async (e) => {
                 e.preventDefault();
@@ -572,7 +571,7 @@
             const saveApiKey = async () => { await setDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'), { googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
             const handleSmartDivide = async () => { setIsOptimizing(true); const clusters = await optimizeRoutesGoogle(visits, splitCount, churchLocation, pastorLocation, googleApiKey); setOptimizedGroups(clusters); setIsOptimizing(false); };
-            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); const currentMonth = new Date().toLocaleString('pt-PT', { month: 'long' }); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: `${gIdx+1} - ${currentMonth}`, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
+            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: `${gIdx+1} - ${currentMonth}`, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
             const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
             const handleShowInternalMap = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); setMapData(toVisit); setShowMap(true); };
             const openSingleMap = (lat, lng) => { if (lat && lng) window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`, '_blank'); else alert("Sem GPS"); };
@@ -622,7 +621,11 @@
                 </div>
             );
 
-            // --- FILTRAGEM SEGURA USANDO DERIVED STATE ---
+            // --- 5. DERIVED STATE ---
+            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
+
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
             
             const activeGroups = {};
