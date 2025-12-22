@@ -27,28 +27,17 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <script>
-        window.onerror = function(message, source, lineno, colno, error) {
-            const root = document.getElementById('root');
-            if(root) root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
-                             '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Ocorreu um erro</h2>' +
-                             '<p style="font-size:14px; margin-bottom:20px;">' + message + '</p>' +
-                             '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold;">Reiniciar Aplicação</button>' +
-                             '</div>';
-        };
-    </script>
-
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // --- 1. CONSTANTES ---
-        const APP_VERSION = "12.7.1 (View Fix)";
+        const APP_VERSION = "13.1.0 (Smart Limits)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const appId = "santa-ceia-v1"; 
+        const APP_ID = "santa-ceia-v1";
+        const MAX_WAYPOINTS_PER_ROUTE = 23; // Limite da API Google
 
-        // --- 🔴 CONFIGURAÇÃO DO FIREBASE (Cole suas chaves aqui se sumirem) ---
+        // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -58,7 +47,6 @@
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
 
-        // --- 2. INICIALIZAÇÃO FIREBASE ---
         let app, auth, db;
         const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
 
@@ -70,7 +58,7 @@
             } catch (e) { console.error("Erro Firebase Init", e); }
         }
 
-        // --- 3. UTILITÁRIOS ---
+        // --- UTILITÁRIOS ---
         const safeFloat = (val) => {
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.'));
@@ -111,7 +99,7 @@
             });
         };
 
-        // --- 4. ALGORITMOS ---
+        // --- ALGORITMOS ---
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
@@ -166,7 +154,9 @@
             const clusters = getBestClusters(validVisits, k);
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
-                if (cluster.length > 23) return cluster;
+                // Se o cluster for maior que o permitido, divide internamente ou usa fallback
+                if (cluster.length > MAX_WAYPOINTS_PER_ROUTE) return cluster;
+
                 const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
                 const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
                 const waypoints = cluster.map(v => ({
@@ -188,7 +178,7 @@
             return optimizedClusters;
         };
 
-        // --- 5. COMPONENTES VISUAIS ---
+        // --- COMPONENTES VISUAIS ---
         const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }) => {
             const variants = {
                 primary: "bg-blue-700 text-white hover:bg-blue-800",
@@ -246,6 +236,18 @@
                 return this.props.children;
             }
         }
+
+        const loadGoogleMapsScript = (apiKey) => {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.maps) return resolve();
+                if (document.querySelector('#google-maps-script')) return resolve();
+                const script = document.createElement('script');
+                script.id = 'google-maps-script';
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
+                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
+                document.body.appendChild(script);
+            });
+        };
 
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
@@ -389,7 +391,8 @@
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
-                            setIsAdminMode(true); // Super Admin starts as Admin
+                            setIsAdminMode(false);
+                            // Ensure Super Admin is saved in DB for team selection
                             await setDoc(doc(db, 'artifacts', appId, 'users', u.uid), adminProfile); 
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
@@ -569,7 +572,26 @@
             const saveConfigFromInput = async (type, input) => { if (!input) return; const coords = await resolveInputToCoords(input); if (coords) { const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; const data = { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) }; await setDoc(doc(db, 'artifacts', appId, 'settings', collectionName), data); if (type === 'church') setChurchLocation(data); else setPastorLocation(data); alert("Salvo!"); } else alert("Inválido."); };
             const saveApiKey = async () => { await setDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'), { googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
-            const handleSmartDivide = async () => { setIsOptimizing(true); const clusters = await optimizeRoutesGoogle(visits, splitCount, churchLocation, pastorLocation, googleApiKey); setOptimizedGroups(clusters); setIsOptimizing(false); };
+            const handleSmartDivide = async () => { 
+                const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng) && !v.attendedChurch);
+                const limit = 23;
+                
+                // Calcula o número mínimo de grupos necessário
+                const minGroupsNeeded = Math.ceil(validVisits.length / limit);
+                
+                // Se o usuário escolheu menos grupos do que o necessário, força o mínimo
+                let finalSplitCount = splitCount;
+                if (finalSplitCount < minGroupsNeeded) {
+                    finalSplitCount = minGroupsNeeded;
+                    setSplitCount(finalSplitCount);
+                    alert(`Ajustado para ${finalSplitCount} grupos para respeitar o limite de 23 paragens do Google Maps.`);
+                }
+
+                setIsOptimizing(true); 
+                const clusters = await optimizeRoutesGoogle(visits, finalSplitCount, churchLocation, pastorLocation, googleApiKey); 
+                setOptimizedGroups(clusters); 
+                setIsOptimizing(false); 
+            };
             const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); const currentMonth = new Date().toLocaleString('pt-PT', { month: 'long' }); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: `${gIdx+1} - ${currentMonth}`, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
             const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
             const handleShowInternalMap = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); setMapData(toVisit); setShowMap(true); };
@@ -679,10 +701,20 @@
                                     <h2 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><Icons.Split /> Criar Roteiros {googleApiKey ? '⚡ Google' : '(Offline)'}</h2>
                                     <div className="flex gap-2 items-center">
                                         <select value={splitCount} onChange={e=>setSplitCount(Number(e.target.value))} className="p-2 border rounded-lg flex-1 bg-white">
-                                            <option value={1}>1 Grupo</option><option value={2}>2 Grupos</option><option value={3}>3 Grupos</option>
+                                            {/* Gerar opções dinamicamente com base no limite de 23 */}
+                                            {(() => {
+                                                const validCount = visits.filter(v => !v.attendedChurch && v.lat).length;
+                                                const min = Math.ceil(validCount / 23) || 1;
+                                                const opts = [];
+                                                for(let i=min; i<=Math.max(min+3, 5); i++) {
+                                                    opts.push(<option key={i} value={i}>{i} Grupo{i>1?'s':''}</option>);
+                                                }
+                                                return opts;
+                                            })()}
                                         </select>
                                         <Button onClick={handleSmartDivide} disabled={isOptimizing}>{isOptimizing ? '...' : 'Gerar'}</Button>
                                     </div>
+                                    <p className="text-[10px] text-blue-600 mt-1">* Opções limitadas automaticamente para máx. 23 casas/grupo.</p>
                                 </div>
                                 {optimizedGroups && (
                                     <div className="space-y-6">
@@ -715,6 +747,7 @@
                                                             <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold">{g.isGoogleOptimized ? 'G' : idx+1}</span>
                                                             <div className="truncate">
                                                                 <span className="text-sm font-medium">{v.name}</span>
+                                                                <div className="text-[10px] text-slate-400 font-mono">{v.duration}</div>
                                                             </div>
                                                         </li>
                                                     ))}
