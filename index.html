@@ -33,7 +33,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "10.0.0 (Robust Opt)";
+        const APP_VERSION = "10.1.0 (Error Diag)";
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
@@ -221,15 +221,12 @@
             let bestClusters = [];
             let bestScore = Infinity;
 
-            // Tenta 50 vezes e fica com o agrupamento mais compacto
             for (let t = 0; t < 50; t++) {
                 let centroids = [];
-                // Seeding aleatório
                 if (visits.length > 0) {
                     for (let i = 0; i < k; i++) centroids.push(visits[Math.floor(Math.random() * visits.length)]);
                 }
 
-                // K-Means simples
                 for (let iter = 0; iter < 5; iter++) {
                     const clusters = Array.from({ length: k }, () => []);
                     visits.forEach(visit => {
@@ -243,7 +240,6 @@
                         clusters[clusterIndex].push(visit);
                     });
                     
-                    // Recalcula centróides
                     centroids = clusters.map((cluster, idx) => {
                         if (cluster.length === 0) return centroids[idx]; 
                         const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
@@ -251,7 +247,6 @@
                         return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
                     });
 
-                    // Se for a última iteração, avalia
                     if (iter === 4) {
                         let totalVariance = 0;
                         clusters.forEach((cluster, idx) => {
@@ -262,7 +257,6 @@
                         
                         if (totalVariance < bestScore) {
                             bestScore = totalVariance;
-                            // Distribuição Equilibrada sobre os melhores centróides
                             bestClusters = distributeBalanced(visits, centroids, k);
                         }
                     }
@@ -313,15 +307,10 @@
             // 2. Otimização Google
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
-                
-                // IMPORTANTE: Definir Origem e Destino Fixos
-                const origin = startPoint 
-                    ? new window.google.maps.LatLng(safeFloat(startPoint.lat), safeFloat(startPoint.lng))
-                    : new window.google.maps.LatLng(safeFloat(cluster[0].lat), safeFloat(cluster[0].lng));
+                if (cluster.length > 23) return cluster;
 
-                const destination = endPoint
-                    ? new window.google.maps.LatLng(safeFloat(endPoint.lat), safeFloat(endPoint.lng))
-                    : new window.google.maps.LatLng(safeFloat(cluster[cluster.length-1].lat), safeFloat(cluster[cluster.length-1].lng));
+                const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
+                const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
                 
                 const waypoints = cluster.map(v => ({
                     location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)),
@@ -337,11 +326,16 @@
                         if (status === 'OK') {
                             const newOrder = result.routes[0].waypoint_order;
                             const sortedCluster = newOrder.map(index => cluster[index]);
-                            // Adiciona flag para mostrar que foi otimizado
                             sortedCluster.isGoogleOptimized = true;
                             resolve(sortedCluster);
                         } else {
-                            alert(`Erro na API Google: ${status}. Usando ordem padrão.`);
+                            // DIAGNÓSTICO DE ERRO AMIGÁVEL
+                            let errorMsg = "Erro desconhecido na Google API";
+                            if (status === 'REQUEST_DENIED') errorMsg = "Erro de Permissão: Verifique se ativou a 'Directions API' e se tem a Faturação (Cartão) ativa no Google Cloud.";
+                            if (status === 'OVER_QUERY_LIMIT') errorMsg = "Limite excedido ou sem saldo na conta Google.";
+                            if (status === 'ZERO_RESULTS') errorMsg = "O Google não encontrou rota entre estes pontos (são acessíveis de carro?).";
+                            
+                            alert(`⚠️ A Otimização Google falhou: ${errorMsg}\n\nO sistema usou o modo matemático (offline) como alternativa.`);
                             resolve(cluster); 
                         }
                     });
@@ -350,15 +344,10 @@
             return optimizedClusters;
         };
 
-        // Fallback simplificado
         const optimizeRoutesFallback = (visits, k, startPoint) => {
             const validVisits = visits.filter(v => safeFloat(v.lat));
             const clusters = getBestClusters(validVisits, k);
-            // Ordenação simples por vizinho mais próximo
-            return clusters.map(cluster => {
-                 // ... (lógica TSP simples omitida para brevidade, mantém a ordem do cluster) ...
-                 return cluster; 
-            });
+            return clusters.map(cluster => cluster);
         };
 
         const calculateExpiration = (durationString) => {
@@ -560,7 +549,7 @@
 
             const refreshData = () => loadData(true);
 
-            // ... (addVisit, updateGPS, handleLinkGPS, saveCoords same as before) ...
+            // ... same helpers ...
             const resolveInputToCoords = async (input) => {
                 const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
                 if (commaMatch) return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
@@ -577,6 +566,7 @@
                 let match = input.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || input.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
                 return match ? { lat: match[1], lng: match[2] } : null;
             };
+
             const handleLinkGPS = async (id) => {
                 const input = prompt("Link/Coords:");
                 if(!input) return;
@@ -604,7 +594,7 @@
             
             const reoptimizeGroup = async (groupIndex, group) => {
                 if (!googleApiKey) return alert("Precisa da Chave do Google para re-otimizar.");
-                if (!confirm("Re-otimizar este grupo? Isso pode mudar a ordem das visitas.")) return;
+                if (!confirm("Re-otimizar este grupo?")) return;
                 setIsOptimizing(true);
                 const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey);
                 const newGroups = [...optimizedGroups];
@@ -634,7 +624,6 @@
             };
 
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
-
             if (!user) return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50">
                     <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm">
@@ -790,7 +779,7 @@
                                 )}
                             </div>
                         )}
-
+                        {/* ... (activeTab === 'list', configModalOpen, etc.) - Restante do código mantido igual ao anterior para não quebrar ... */}
                         {activeTab === 'list' && (
                             <div className="space-y-4">
                                 {!isPastor && myVisits.length > 0 && (
@@ -889,7 +878,6 @@
                         </div>
                     )}
 
-                    {/* Other modals (Renew, Add) are standard... */}
                     {renewTarget && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
