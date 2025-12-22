@@ -32,12 +32,12 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // --- CONSTANTES ---
-        const APP_VERSION = "12.2.0 (Stable)";
+        // --- CONSTANTES GLOBAIS ---
+        const APP_VERSION = "12.3.0 (Stable Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const APP_ID = "santa-ceia-v1";
+        const appId = "santa-ceia-v1"; // CORRIGIDO: minúscula para consistência
 
-        // --- FIREBASE CONFIG ---
+        // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -47,7 +47,7 @@
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
 
-        // --- INICIALIZAÇÃO SEGURA ---
+        // Inicialização
         let app, auth, db;
         const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
 
@@ -56,36 +56,22 @@
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
-            } catch (e) { console.error("Firebase Init Error:", e); }
+            } catch (e) { console.error("Erro Firebase", e); }
         }
 
-        // --- COMPONENTES UI (DEFINIDOS ANTES DO USO) ---
-        // Definimos o componente Button (B maiúsculo) explicitamente aqui
+        // --- COMPONENTES UI ---
         const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }) => {
-            const baseClass = "flex items-center justify-center px-4 py-3 rounded-lg font-medium active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed";
             const variants = {
-                primary: "bg-blue-700 text-white hover:bg-blue-800 shadow-md",
-                secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50",
-                success: "bg-emerald-600 text-white hover:bg-emerald-700 shadow-md",
+                primary: "bg-blue-700 text-white hover:bg-blue-800",
+                secondary: "bg-white text-slate-700 border border-slate-200",
+                success: "bg-emerald-600 text-white hover:bg-emerald-700",
                 danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100",
                 ghost: "bg-transparent text-slate-600 hover:bg-slate-100"
             };
-            return (
-                <button 
-                    onClick={onClick} 
-                    disabled={disabled} 
-                    className={`${baseClass} ${variants[variant] || variants.primary} ${className}`}
-                >
-                    {children}
-                </button>
-            );
+            return <button onClick={onClick} disabled={disabled} className={`flex items-center justify-center px-4 py-3 rounded-lg font-medium active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`}>{children}</button>;
         };
 
-        const Badge = ({ children, color }) => (
-            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${color}`}>
-                {children}
-            </span>
-        );
+        const Badge = ({ children, color }) => <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${color}`}>{children}</span>;
 
         // --- ÍCONES ---
         const Icons = {
@@ -115,7 +101,6 @@
             Lightning: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         };
 
-        // --- ERROR BOUNDARY ---
         class ErrorBoundary extends React.Component {
             constructor(props) { super(props); this.state = { hasError: false, error: null }; }
             static getDerivedStateFromError(error) { return { hasError: true, error }; }
@@ -132,35 +117,7 @@
             }
         }
 
-        // --- FUNÇÕES DE AJUDA ---
-        const safeFloat = (val) => {
-            if (!val) return 0;
-            return parseFloat(String(val).replace(',', '.'));
-        };
-
-        const calculateExpiration = (durationString) => {
-            if (durationString === 'Permanente') return null;
-            const months = parseInt(durationString.split(' ')[0]);
-            if (isNaN(months)) return null;
-            const d = new Date();
-            d.setMonth(d.getMonth() + months);
-            return d.toISOString();
-        };
-
-        const isExpired = (visit) => {
-            if (!visit.expiresAt) return false;
-            return new Date() > new Date(visit.expiresAt);
-        };
-
-        const getDistance = (lat1, lon1, lat2, lon2) => {
-            const R = 6371; 
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
-        };
-
+        // --- GOOGLE MAPS LOADER ---
         const loadGoogleMapsScript = (apiKey) => {
             return new Promise((resolve, reject) => {
                 if (window.google && window.google.maps) return resolve();
@@ -173,6 +130,7 @@
             });
         };
 
+        // --- MAPA EMBUTIDO ---
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
             const [scriptLoaded, setScriptLoaded] = React.useState(false);
@@ -219,6 +177,7 @@
                     return;
                 }
 
+                // Fallback Leaflet
                 const center = churchLocation ? [churchLocation.lat, churchLocation.lng] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
                 const map = L.map(mapContainerRef.current).setView(center, 13);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
@@ -263,7 +222,7 @@
             );
         };
 
-        // --- ALGORITMOS OTIMIZAÇÃO ---
+        // --- ALGORITMOS ---
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
@@ -301,11 +260,9 @@
                         });
                         if (totalVariance < bestScore) {
                             bestScore = totalVariance;
-                            // Balanced distribution
                             const baseSize = Math.floor(visits.length / k);
                             const remainder = visits.length % k;
                             const capacities = Array.from({ length: k }, (_, i) => baseSize + (i < remainder ? 1 : 0));
-                            
                             let edges = [];
                             visits.forEach((visit, vIdx) => {
                                 centroids.forEach((centroid, cIdx) => {
@@ -314,11 +271,9 @@
                                 });
                             });
                             edges.sort((a, b) => a.dist - b.dist);
-                            
                             const assignedGroups = Array.from({ length: k }, () => []);
                             const assignedVisits = new Set();
                             const groupCounts = new Array(k).fill(0);
-                            
                             for (const edge of edges) {
                                 if (assignedVisits.has(edge.vIdx)) continue;
                                 if (groupCounts[edge.cIdx] >= capacities[edge.cIdx]) continue;
@@ -392,7 +347,6 @@
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
 
-            // Data State
             const [visits, setVisits] = React.useState([]);
             const [usersList, setUsersList] = React.useState([]);
             const [churchLocation, setChurchLocation] = React.useState(null);
@@ -402,11 +356,9 @@
             const [isProcessingLink, setIsProcessingLink] = React.useState(false);
             const [isOptimizing, setIsOptimizing] = React.useState(false);
             
-            // Map State
             const [showMap, setShowMap] = React.useState(false);
             const [mapData, setMapData] = React.useState([]);
 
-            // UI State
             const [activeTab, setActiveTab] = React.useState('list');
             const [newName, setNewName] = React.useState('');
             const [newAddress, setNewAddress] = React.useState('');
@@ -420,12 +372,11 @@
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
-            
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // --- 5. DERIVED STATE ---
+            // --- ESTADO DERIVADO ---
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
@@ -472,8 +423,8 @@
                             const all = snap.docs.map(d => ({id: d.id, ...d.data()}));
                             setUsersList(all);
                             setAvailableOfficers({
-                                presbiteros: all.filter(u => u.role.toLowerCase() === 'presbitero'),
-                                diaconos: all.filter(u => u.role.toLowerCase() === 'diacono')
+                                presbiteros: all.filter(u => u.role && u.role.toLowerCase() === 'presbitero'),
+                                diaconos: all.filter(u => u.role && u.role.toLowerCase() === 'diacono')
                             });
                         } catch (e) { console.error("Erro oficiais", e); }
                     };
@@ -668,7 +619,7 @@
                 </div>
             );
 
-            const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
+            // --- FILTRAGEM SEGURA USANDO DERIVED STATE ---
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
             
             const activeGroups = {};
