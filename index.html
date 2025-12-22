@@ -27,34 +27,25 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
     
+    <!-- Sistema de Diagnóstico de Erro Global -->
     <script>
-        window.onerror = function(message, source, lineno, colno, error) {
+        function showErrorScreen(msg, source) {
             const root = document.getElementById('root');
-            const errorText = "Erro: " + message + "\nFonte: " + source + "\nLinha: " + lineno;
-            
-            window.copyError = function() {
-                var textArea = document.createElement("textarea");
-                textArea.value = errorText;
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    alert('Erro copiado!');
-                } catch (err) {
-                    alert('Erro ao copiar.');
-                }
-                document.body.removeChild(textArea);
-            };
-
-            if(root && !document.getElementById('error-display')) {
-                root.innerHTML = '<div id="error-display" style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
-                                 '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Ocorreu um erro crítico</h2>' +
-                                 '<p style="font-size:14px; margin-bottom:20px; background:#fee2e2; padding:10px; border-radius:5px; word-break:break-word;">' + message + '</p>' +
+            if(root && !document.getElementById('error-screen')) {
+                root.innerHTML = '<div id="error-screen" style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
+                                 '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Erro Detetado</h2>' +
+                                 '<p style="font-size:14px; margin-bottom:20px; background:#fee2e2; padding:10px; border-radius:5px; word-break:break-word;">' + msg + '<br><small style="color:#666">' + (source || '') + '</small></p>' +
                                  '<div style="display:flex; gap:10px; justify-content:center;">' +
-                                 '<button onclick="window.copyError()" style="background:#fff; border:1px solid #b91c1c; color:#b91c1c; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Copiar</button>' +
+                                 '<button onclick="navigator.clipboard.writeText(\'' + msg.replace(/'/g, "") + '\'); alert(\'Copiado!\')" style="background:#fff; border:1px solid #b91c1c; color:#b91c1c; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Copiar</button>' +
                                  '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Reiniciar</button>' +
                                  '</div></div>';
             }
+        }
+        window.onerror = function(message, source, lineno, colno, error) {
+            showErrorScreen(message, "Linha: " + lineno);
+        };
+        window.onunhandledrejection = function(event) {
+            showErrorScreen("Erro Assíncrono (Promessa): " + event.reason, "Network/Async");
         };
     </script>
 
@@ -64,9 +55,9 @@
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- 1. CONSTANTES ---
-        const APP_VERSION = "12.8.1 (Var Fix)";
+        const APP_VERSION = "12.9.0 (Full Integrity)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const appId = "santa-ceia-v1"; // CORRIGIDO: Nome da variável em minúsculas essencial
+        const appId = "santa-ceia-v1"; 
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE (MANTENHA AS SUAS CHAVES AQUI) ---
         const firebaseConfig = {
@@ -402,6 +393,7 @@
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
+            
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
@@ -770,7 +762,6 @@
                                                             <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold">{g.isGoogleOptimized ? 'G' : idx+1}</span>
                                                             <div className="truncate">
                                                                 <span className="text-sm font-medium">{v.name}</span>
-                                                                <div className="text-[10px] text-slate-400 font-mono">{v.duration}</div>
                                                             </div>
                                                         </li>
                                                     ))}
@@ -831,7 +822,6 @@
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <h3 className={`font-bold flex items-center gap-2 ${isChecked ? 'text-green-700 line-through' : (expired ? 'text-red-700' : '')}`}>{v.name} {isChecked && <Icons.CheckCircle size={16} />}</h3>
-                                                            {v.lat && v.lng && <p className="text-[10px] text-slate-400 font-mono mb-1">{safeFloat(v.lat).toFixed(5)}, {safeFloat(v.lng).toFixed(5)}</p>}
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
                                                         {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
