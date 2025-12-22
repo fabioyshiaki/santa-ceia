@@ -26,30 +26,16 @@
 </head>
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
-    
-    <!-- Sistema de Diagnóstico de Erro Global -->
-    <script>
-        window.onerror = function(message, source, lineno, colno, error) {
-            const root = document.getElementById('root');
-            root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
-                             '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Ocorreu um erro</h2>' +
-                             '<p style="font-size:14px; margin-bottom:20px;">' + message + '</p>' +
-                             '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold;">Reiniciar Aplicação</button>' +
-                             '</div>';
-        };
-    </script>
 
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // --- 1. CONSTANTES ---
-        const APP_VERSION = "12.7.0 (Safe)";
+        const APP_VERSION = "13.0.0 (Save Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const appId = "santa-ceia-v1"; 
+        const APP_ID = "santa-ceia-v1";
 
-        // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -59,7 +45,6 @@
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
 
-        // --- 2. INICIALIZAÇÃO FIREBASE ---
         let app, auth, db;
         const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
 
@@ -71,7 +56,6 @@
             } catch (e) { console.error("Erro Firebase Init", e); }
         }
 
-        // --- 3. UTILITÁRIOS ---
         const safeFloat = (val) => {
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.'));
@@ -112,7 +96,6 @@
             });
         };
 
-        // --- 4. ALGORITMOS ---
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
@@ -189,7 +172,6 @@
             return optimizedClusters;
         };
 
-        // --- 5. COMPONENTES VISUAIS ---
         const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }) => {
             const variants = {
                 primary: "bg-blue-700 text-white hover:bg-blue-800",
@@ -335,7 +317,8 @@
 
         // --- APP ---
         function App() {
-            // DECLARAÇÃO DE HOOKS NO INÍCIO (SEMPRE)
+            if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
+
             const [user, setUser] = React.useState(null);
             const [userData, setUserData] = React.useState(null);
             const [loading, setLoading] = React.useState(true);
@@ -370,13 +353,17 @@
             const [optimizedGroups, setOptimizedGroups] = React.useState(null);
             const [teamAssignments, setTeamAssignments] = React.useState({}); 
             const [availableOfficers, setAvailableOfficers] = React.useState({ presbiteros: [], diaconos: [] });
+            
             const [editChurchCoords, setEditChurchCoords] = React.useState('');
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // EFEITO DE AUTH
+            // --- 5. DERIVED STATE ---
+            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
+
             React.useEffect(() => {
-                if (!auth) return; // Proteção contra falha no Firebase
                 const unsub = onAuthStateChanged(auth, async (u) => {
                     setUser(u);
                     if (u) {
@@ -386,6 +373,8 @@
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
                             setIsAdminMode(false);
+                            // Ensure Super Admin is saved in DB for team selection
+                            await setDoc(doc(db, 'artifacts', appId, 'users', u.uid), adminProfile); 
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
                             setUserData(parsed);
@@ -409,7 +398,6 @@
                 return () => unsub();
             }, []);
 
-            // EFEITO DE DADOS
             React.useEffect(() => {
                 if (isAdminMode || (user?.email === SUPER_ADMIN_EMAIL)) {
                     if (!db) return;
@@ -428,12 +416,6 @@
                     fetchOfficers();
                 }
             }, [isAdminMode, user]);
-
-            React.useEffect(() => { if (user) loadData(); }, [user]);
-
-            // CONDICIONAIS DE RENDERIZAÇÃO NO FIM
-            if (!isConfigured) return <div className="p-10 text-center text-red-600 font-bold">⚠️ Erro: Chaves do Firebase não configuradas.</div>;
-            if (!auth) return <div className="p-10 text-center text-red-600 font-bold">⚠️ Erro: Falha ao ligar ao servidor.</div>;
 
             const loadData = async (force = false) => {
                 if (!user || !db) return;
@@ -463,7 +445,6 @@
                     const list = querySnapshot.docs.map(d => ({id: d.id, ...d.data()}));
                     list.sort((a,b) => (a.orderIndex||999) - (b.orderIndex||999));
                     
-                    // Auto Clean logic ...
                     const batchCleanup = [];
                     let cleanupNeeded = false;
                     list.forEach(v => {
@@ -503,6 +484,8 @@
                 } catch (e) { console.error("Erro dados", e); }
                 setLoading(false);
             };
+
+            React.useEffect(() => { if (user) loadData(); }, [user]);
 
             const handleAuth = async (e) => {
                 e.preventDefault();
@@ -571,7 +554,51 @@
             const saveApiKey = async () => { await setDoc(doc(db, 'artifacts', appId, 'settings', 'api_keys'), { googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
             const handleSmartDivide = async () => { setIsOptimizing(true); const clusters = await optimizeRoutesGoogle(visits, splitCount, churchLocation, pastorLocation, googleApiKey); setOptimizedGroups(clusters); setIsOptimizing(false); };
-            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: `${gIdx+1} - ${currentMonth}`, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
+            const saveRoutes = async () => { 
+                try {
+                    setLoading(true);
+                    const batch = []; 
+                    const nowISO = new Date().toISOString(); 
+                    const currentMonth = new Date().toLocaleString('pt-PT', { month: 'long' }); 
+                    
+                    optimizedGroups.forEach((group, gIdx) => { 
+                        const team = teamAssignments[gIdx] || {}; 
+                        const parts = []; 
+                        if (team.presbitero && team.presbitero !== "") parts.push(team.presbitero); 
+                        if (team.diacono && team.diacono !== "") parts.push(team.diacono); 
+                        const assignedTo = parts.join(' & ') || null; 
+                        
+                        if(!assignedTo) return; 
+
+                        group.forEach((v, idx) => { 
+                            const promise = updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { 
+                                assignedTo: assignedTo, 
+                                assignedGroup: `${gIdx+1} - ${currentMonth}`, 
+                                orderIndex: idx, 
+                                assignmentDate: nowISO 
+                            }); 
+                            batch.push(promise);
+                        }); 
+                    }); 
+                    
+                    if(batch.length === 0) {
+                        setLoading(false);
+                        return alert("⚠️ Nenhuma rota salva. Por favor selecione os responsáveis."); 
+                    }
+
+                    await Promise.all(batch); 
+                    setOptimizedGroups(null); 
+                    setTeamAssignments({});
+                    setActiveTab('list'); 
+                    alert("✅ Sucesso! Rotas salvas."); 
+                    refreshData(); 
+                } catch (e) {
+                    console.error(e);
+                    alert("Erro ao salvar: " + e.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
             const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
             const handleShowInternalMap = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); setMapData(toVisit); setShowMap(true); };
             const openSingleMap = (lat, lng) => { if (lat && lng) window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`, '_blank'); else alert("Sem GPS"); };
@@ -621,11 +648,7 @@
                 </div>
             );
 
-            // --- 5. DERIVED STATE ---
-            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
-
+            // --- FILTRAGEM SEGURA USANDO DERIVED STATE ---
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
             
             const activeGroups = {};
