@@ -26,16 +26,28 @@
 </head>
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
+    
+    <!-- Sistema de Diagnóstico de Erro Global -->
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            const root = document.getElementById('root');
+            root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
+                             '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Ocorreu um erro</h2>' +
+                             '<p style="font-size:14px; margin-bottom:20px;">' + message + '</p>' +
+                             '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold;">Reiniciar Aplicação</button>' +
+                             '</div>';
+        };
+    </script>
 
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, setDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        const APP_VERSION = "13.1.0 (Smart Limits)";
+        // --- 1. CONSTANTES ---
+        const APP_VERSION = "12.7.1 (Crash Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
-        const APP_ID = "santa-ceia-v1";
-        const MAX_WAYPOINTS_PER_ROUTE = 23; // Limite da API Google
+        const APP_ID = "santa-ceia-v1"; // ID corrigido para evitar perda de dados
 
         // --- 🔴 CONFIGURAÇÃO DO FIREBASE ---
         const firebaseConfig = {
@@ -47,6 +59,7 @@
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
 
+        // --- 2. INICIALIZAÇÃO FIREBASE ---
         let app, auth, db;
         const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
 
@@ -58,7 +71,7 @@
             } catch (e) { console.error("Erro Firebase Init", e); }
         }
 
-        // --- UTILITÁRIOS ---
+        // --- 3. UTILITÁRIOS ---
         const safeFloat = (val) => {
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.'));
@@ -99,7 +112,7 @@
             });
         };
 
-        // --- ALGORITMOS ---
+        // --- 4. ALGORITMOS ---
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
@@ -154,9 +167,7 @@
             const clusters = getBestClusters(validVisits, k);
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
-                // Se o cluster for maior que o permitido, divide internamente ou usa fallback
-                if (cluster.length > MAX_WAYPOINTS_PER_ROUTE) return cluster;
-
+                if (cluster.length > 23) return cluster;
                 const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
                 const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
                 const waypoints = cluster.map(v => ({
@@ -178,7 +189,7 @@
             return optimizedClusters;
         };
 
-        // --- COMPONENTES VISUAIS ---
+        // --- 5. COMPONENTES VISUAIS ---
         const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }) => {
             const variants = {
                 primary: "bg-blue-700 text-white hover:bg-blue-800",
@@ -382,6 +393,9 @@
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
 
+            // FIX: PROTEÇÃO DE VARIAVEL NULL
+            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
+
             React.useEffect(() => {
                 const unsub = onAuthStateChanged(auth, async (u) => {
                     setUser(u);
@@ -391,8 +405,7 @@
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
-                            setIsAdminMode(false);
-                            // Ensure Super Admin is saved in DB for team selection
+                            setIsAdminMode(true); 
                             await setDoc(doc(db, 'artifacts', appId, 'users', u.uid), adminProfile); 
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
@@ -575,43 +588,25 @@
             const handleSmartDivide = async () => { 
                 const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng) && !v.attendedChurch);
                 const limit = 23;
-                
-                // Calcula o número mínimo de grupos necessário
                 const minGroupsNeeded = Math.ceil(validVisits.length / limit);
-                
-                // Se o usuário escolheu menos grupos do que o necessário, força o mínimo
                 let finalSplitCount = splitCount;
                 if (finalSplitCount < minGroupsNeeded) {
                     finalSplitCount = minGroupsNeeded;
                     setSplitCount(finalSplitCount);
                     alert(`Ajustado para ${finalSplitCount} grupos para respeitar o limite de 23 paragens do Google Maps.`);
                 }
-
                 setIsOptimizing(true); 
                 const clusters = await optimizeRoutesGoogle(visits, finalSplitCount, churchLocation, pastorLocation, googleApiKey); 
                 setOptimizedGroups(clusters); 
                 setIsOptimizing(false); 
             };
-            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); const currentMonth = new Date().toLocaleString('pt-PT', { month: 'long' }); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero) parts.push(team.presbitero); if (team.diacono) parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: `${gIdx+1} - ${currentMonth}`, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
+            const saveRoutes = async () => { const batch = []; const nowISO = new Date().toISOString(); const currentMonth = new Date().toLocaleString('pt-PT', { month: 'long' }); optimizedGroups.forEach((group, gIdx) => { const team = teamAssignments[gIdx] || {}; const parts = []; if (team.presbitero && team.presbitero !== "") parts.push(team.presbitero); if (team.diacono && team.diacono !== "") parts.push(team.diacono); const assignedTo = parts.join(' & ') || null; if(!assignedTo) return; group.forEach((v, idx) => { batch.push(updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: assignedTo, assignedGroup: `${gIdx+1} - ${currentMonth}`, orderIndex: idx, assignmentDate: nowISO })); }); }); if(batch.length === 0) return alert("Selecione os responsáveis."); await Promise.all(batch); setOptimizedGroups(null); setActiveTab('list'); alert("Roteiros salvos!"); refreshData(); };
             const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = toReset.map(v => updateDoc(doc(db, 'artifacts', appId, 'visits', v.id), { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null })); await Promise.all(batch); refreshData(); };
             const handleShowInternalMap = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); setMapData(toVisit); setShowMap(true); };
             const openSingleMap = (lat, lng) => { if (lat && lng) window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`, '_blank'); else alert("Sem GPS"); };
             const openMaps = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); const validPoints = toVisit.filter(v => safeFloat(v.lat) && safeFloat(v.lng)); if (validPoints.length === 0) return alert("Sem GPS."); const sorted = [...validPoints].sort((a,b) => (a.orderIndex||0)-(b.orderIndex||0)); const coordsList = []; if (churchLocation) coordsList.push(`${safeFloat(churchLocation.lat)},${safeFloat(churchLocation.lng)}`); sorted.forEach(v => coordsList.push(`${safeFloat(v.lat)},${safeFloat(v.lng)}`)); if (pastorLocation) coordsList.push(`${safeFloat(pastorLocation.lat)},${safeFloat(pastorLocation.lng)}`); window.open(`https://www.google.com/maps/dir/${coordsList.join('/')}`, '_blank'); };
 
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
-
-            // --- FILTRAGEM SEGURA USANDO DERIVED STATE ---
-            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name));
-            
-            const activeGroups = {};
-            if (isPastor) {
-                visits.forEach(v => {
-                    if (v.assignedGroup && v.assignedTo) {
-                        if (!activeGroups[v.assignedGroup]) activeGroups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
-                        activeGroups[v.assignedGroup].count++;
-                    }
-                });
-            }
 
             if (!user) return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50">
@@ -808,7 +803,6 @@
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <h3 className={`font-bold flex items-center gap-2 ${isChecked ? 'text-green-700 line-through' : (expired ? 'text-red-700' : '')}`}>{v.name} {isChecked && <Icons.CheckCircle size={16} />}</h3>
-                                                            {v.lat && v.lng && <p className="text-[10px] text-slate-400 font-mono mb-1">{safeFloat(v.lat).toFixed(5)}, {safeFloat(v.lng).toFixed(5)}</p>}
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
                                                         {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
@@ -945,7 +939,7 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<ErrorBoundary><App /></ErrorBoundary>);
+        root.render(<App />);
     </script>
 </body>
 </html>
