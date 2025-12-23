@@ -70,7 +70,7 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "14.0.0 (Aba Gestão)";
+        const APP_VERSION = "14.1.0 (GPS Indicators)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -263,20 +263,42 @@
         class ErrorBoundary extends React.Component {
             constructor(props) { super(props); this.state = { hasError: false, error: null }; }
             static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            
+            copyError() {
+                const text = this.state.error?.message + '\n' + (this.state.error?.stack || '');
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => alert("Erro copiado!"), () => this.fallbackCopy(text));
+                } else {
+                    this.fallbackCopy(text);
+                }
+            }
+
+            fallbackCopy(text) {
+                var textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try { document.execCommand('copy'); alert('Erro copiado!'); } catch (err) { alert('Falha ao copiar.'); }
+                document.body.removeChild(textArea);
+            }
+
             render() {
                 if (this.state.hasError) return (
                     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-red-50 text-red-900 text-center">
                         <Icons.Alert />
                         <h1 className="text-xl font-bold mt-4">Algo correu mal</h1>
-                        <p className="text-sm mt-2 mb-6 opacity-80">{this.state.error?.message}</p>
-                        <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg">Reiniciar App</button>
+                        <p className="text-sm mt-2 mb-6 opacity-80 bg-red-100 p-2 rounded max-w-md overflow-auto">{this.state.error?.message}</p>
+                        <div className="flex gap-2">
+                            <button onClick={() => this.copyError()} className="bg-white border border-red-200 text-red-700 px-6 py-3 rounded-xl font-bold shadow-sm">Copiar Erro</button>
+                            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg">Reiniciar App</button>
+                        </div>
                     </div>
                 );
                 return this.props.children;
             }
         }
-
-        // --- MODAL DE ERRO ---
+        
+        // --- MODAL DE ERRO CUSTOMIZADO ---
         const ErrorModal = ({ message, onClose }) => {
             if (!message) return null;
             const copyToClipboard = () => {
@@ -785,7 +807,7 @@
                         <div className="flex gap-2 ml-2">
                             <button onClick={refreshData} className="p-2 bg-blue-100 text-blue-700 rounded-full shadow-sm border-2 border-blue-200"><Icons.CloudDownload /></button>
                             {canManage && <button onClick={()=>setTeamModalOpen(true)} className="p-2 bg-indigo-100 text-indigo-700 rounded-full shadow-sm border-2 border-indigo-200 font-bold text-xs flex items-center justify-center">Equipe</button>}
-                            {isPastor && <button onClick={()=>setConfigModalOpen(true)} className="p-2 bg-slate-100 rounded-full"><Icons.Settings /></button>}
+                            {isSuperAdmin && <button onClick={()=>setConfigModalOpen(true)} className="p-2 bg-slate-100 rounded-full"><Icons.Settings /></button>}
                             <button onClick={()=>{localStorage.clear(); auth.signOut(); window.location.reload()}} className="p-2 bg-red-50 text-red-500 rounded-full"><Icons.LogOut /></button>
                         </div>
                     </header>
@@ -809,17 +831,11 @@
                                     <h2 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><Icons.Split /> Criar Roteiros</h2>
                                     <div className="flex gap-2 items-center">
                                         <select value={splitCount} onChange={e=>setSplitCount(Number(e.target.value))} className="p-2 border rounded-lg flex-1 bg-white">
-                                            {(() => {
-                                                const validCount = visits.filter(v => safeFloat(v.lat) && !v.attendedChurch).length;
-                                                const min = Math.ceil(validCount / 23) || 1;
-                                                const opts = [];
-                                                for(let i=min; i<=Math.max(min+3, 5); i++) opts.push(<option key={i} value={i}>{i} Grupo{i>1?'s':''}</option>);
-                                                return opts;
-                                            })()}
+                                            {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} Grupo(s)</option>)}
                                         </select>
                                         <Button onClick={handleSmartDivide} disabled={isOptimizing}>{isOptimizing ? '...' : 'Gerar'}</Button>
                                     </div>
-                                    <p className="text-[10px] text-blue-600 mt-1">* Limite de 23 casas/grupo.</p>
+                                    <p className="text-[10px] text-blue-600 mt-1">* Opções limitadas automaticamente para máx. 23 casas/grupo.</p>
                                 </div>
                                 {optimizedGroups && optimizedGroups.map((g, i) => (
                                     <div key={i} className="bg-white border rounded-xl p-3 shadow-sm">
@@ -838,6 +854,27 @@
                                     </div>
                                 ))}
                                 {optimizedGroups && <Button onClick={saveRoutes}>Salvar Rotas</Button>}
+                                
+                                {Object.keys(activeGroups).length > 0 && (
+                                    <div className="space-y-4 pt-4 border-t-2 border-dashed border-slate-200">
+                                        <h3 className="font-bold text-slate-700 flex items-center gap-2"><Icons.Navigation size={18}/> Roteiros Ativos</h3>
+                                        <div className="grid gap-3">
+                                            {Object.values(activeGroups).map(group => (
+                                                <div key={group.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
+                                                    <div>
+                                                        <h4 className="font-bold text-blue-800">Roteiro {group.id}</h4>
+                                                        <p className="text-sm text-slate-600">{group.team}</p>
+                                                        <span className="text-xs text-slate-400">{group.count} visitas</span>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <Button onClick={() => openMaps(visits.filter(v => v.assignedGroup === group.id))} className="p-2 h-10 w-10 flex items-center justify-center bg-blue-100 text-blue-700"><Icons.Navigation size={18} /></Button>
+                                                        <Button onClick={() => deleteRoute(group.id)} variant="danger" className="p-2 h-10 w-10 flex items-center justify-center"><Icons.Trash2 size={18} /></Button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -853,7 +890,14 @@
                                         <div key={v.id} className="bg-white p-3 rounded-lg border shadow-sm flex flex-col gap-2">
                                             <div className="flex justify-between items-start">
                                                 <div>
-                                                    <h3 className="font-bold text-slate-800">{v.name}</h3>
+                                                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                                        {v.name}
+                                                        {v.lat ? (
+                                                            <span className="w-2 h-2 rounded-full bg-emerald-500" title="Com Coordenadas"></span>
+                                                        ) : (
+                                                            <span className="w-2 h-2 rounded-full bg-amber-400" title="Sem Coordenadas"></span>
+                                                        )}
+                                                    </h3>
                                                     <p className="text-xs text-slate-500 line-clamp-1">{v.address}</p>
                                                 </div>
                                                 <button onClick={()=>deleteVisit(v.id)} className="text-red-400 p-1"><Icons.Trash2 size={16}/></button>
@@ -882,18 +926,27 @@
                                         </div>
                                     </div>
                                 )}
+                                
                                 <div className="grid gap-3">
                                     {myVisits.length === 0 && <div className="text-center py-10 text-slate-400">Nenhum registo disponível.</div>}
                                     {myVisits.map((v, i) => (
                                         <div key={v.id} className={`p-4 rounded-xl border shadow-sm ${v.attendedChurch ? 'bg-green-50' : 'bg-white'}`}>
                                             <div className="flex justify-between">
-                                                <h3 className="font-bold">{v.name}</h3>
+                                                <h3 className="font-bold flex items-center gap-2">
+                                                    {v.name}
+                                                    {v.lat ? (
+                                                        <span className="w-2 h-2 rounded-full bg-emerald-500" title="Com Coordenadas"></span>
+                                                    ) : (
+                                                        <span className="w-2 h-2 rounded-full bg-amber-400" title="Sem Coordenadas"></span>
+                                                    )}
+                                                </h3>
                                             </div>
                                             <p className="text-sm text-slate-500">{v.address}</p>
                                             <div className="flex gap-2 mt-2">
                                                  <button onClick={() => openSingleMap(v.lat, v.lng)} className="flex items-center justify-center p-2 bg-blue-50 text-blue-600 rounded-lg"><Icons.Navigation size={18} /> Abrir Mapa</button>
+                                                 {(canSeeGPS) && <button onClick={()=>setGpsChoiceTarget(v.id)} disabled={isProcessingLink} className="flex-1 py-2 bg-slate-50 rounded text-xs font-medium">Coordenadas/GPS</button>}
                                             </div>
-                                            <div className="mt-2"><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={v.attendedChurch} onChange={() => toggleAttendance(v.id, v.attendedChurch)} /> Foi à Santa Ceia?</label></div>
+                                            <div className="mt-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={v.attendedChurch} onChange={() => toggleAttendance(v.id, v.attendedChurch)} /> Foi à Santa Ceia?</label></div>
                                         </div>
                                     ))}
                                 </div>
