@@ -35,23 +35,47 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <!-- Error Handler -->
+    <!-- Error Handler Global Avançado -->
     <script>
+        // Função de cópia robusta (funciona em http e iframes)
+        function copyTextToClipboard(text) {
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";  // Evitar scroll
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                var successful = document.execCommand('copy');
+                var msg = successful ? 'sucesso' : 'falha';
+                alert('Texto copiado com ' + msg + '!');
+            } catch (err) {
+                console.error('Erro ao copiar', err);
+                alert('Erro ao copiar: ' + err);
+            }
+            document.body.removeChild(textArea);
+        }
+
         window.onerror = function(message, source, lineno, colno, error) {
             const root = document.getElementById('root');
-            const errorText = `Erro: ${message}\nLinha: ${lineno}`;
-            if(root && !document.getElementById('error-screen')) {
-                root.innerHTML = '<div id="error-screen" style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
-                                 '<h2>Erro Detetado</h2><p>' + message + '</p>' +
-                                 '<button onclick="navigator.clipboard.writeText(\'' + errorText.replace(/'/g, "") + '\'); alert(\'Copiado!\')" style="background:#eee; padding:10px; margin:5px; border-radius:5px;">Copiar</button>' +
-                                 '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; padding:10px; margin:5px; border-radius:5px;">Reiniciar</button>' +
-                                 '</div>';
+            const errorText = `Erro: ${message}\nFonte: ${source}\nLinha: ${lineno}`;
+            
+            // Só mostra se o root não tiver conteúdo ou se já houver um erro
+            if (root) {
+                root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
+                                 '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Erro Detetado</h2>' +
+                                 '<p style="font-size:14px; margin-bottom:20px; background:#fee2e2; padding:10px; border-radius:5px; word-break:break-word;">' + message + '</p>' +
+                                 '<div style="display:flex; gap:10px; justify-content:center;">' +
+                                 '<button onclick="copyTextToClipboard(\'' + errorText.replace(/\n/g, "\\n").replace(/'/g, "\\'") + '\')" style="background:#2563eb; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Copiar Erro</button>' +
+                                 '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Reiniciar</button>' +
+                                 '</div></div>';
             }
+            return false;
         };
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "13.2.0 (Equipe Fix)";
+        const APP_VERSION = "13.3.0 (Syntax Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -371,22 +395,12 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // --- 5. DERIVED STATE ---
+            // 5. DERIVED STATE - FIXED DUPLICATION
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
 
-            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
-            
-            const activeGroups = {};
-            if (isPastor) {
-                visits.forEach(v => {
-                    if (v.assignedGroup && v.assignedTo) {
-                        if (!activeGroups[v.assignedGroup]) activeGroups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
-                        activeGroups[v.assignedGroup].count++;
-                    }
-                });
-            }
+            const myVisits = isPastor ? visits : (userData ? visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name)) : []);
 
             React.useEffect(() => {
                 const unsub = auth.onAuthStateChanged(async (u) => {
@@ -422,7 +436,6 @@
             }, []);
 
             React.useEffect(() => {
-                // SÓ CARREGA A LISTA DE EQUIPA QUANDO O MODAL ABRE (ECONOMIA)
                 if (teamModalOpen && (isAdminMode || user?.email === SUPER_ADMIN_EMAIL)) {
                     if (!db) return;
                     db.collection('artifacts').doc(APP_ID).collection('users').get().then(snap => {
@@ -673,22 +686,6 @@
                 </div>
             );
 
-            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
-
-            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
-            
-            const activeGroups = {};
-            if (isPastor) {
-                visits.forEach(v => {
-                    if (v.assignedGroup && v.assignedTo) {
-                        if (!activeGroups[v.assignedGroup]) activeGroups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
-                        activeGroups[v.assignedGroup].count++;
-                    }
-                });
-            }
-
             return (
                 <div className="pb-24">
                     {showMap && <EmbeddedMap visits={mapData} churchLocation={churchLocation} pastorLocation={pastorLocation} onClose={() => setShowMap(false)} googleApiKey={googleApiKey} />}
@@ -842,6 +839,7 @@
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <h3 className={`font-bold flex items-center gap-2 ${isChecked ? 'text-green-700 line-through' : (expired ? 'text-red-700' : '')}`}>{v.name} {isChecked && <Icons.CheckCircle size={16} />}</h3>
+                                                            {v.lat && v.lng && <p className="text-[10px] text-slate-400 font-mono mb-1">{safeFloat(v.lat).toFixed(5)}, {safeFloat(v.lng).toFixed(5)}</p>}
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
                                                         {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
@@ -877,6 +875,31 @@
                             </div>
                         )}
                     </main>
+                    
+                    {teamModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto">
+                                <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Users/> Gestão de Equipa</h3>
+                                <div className="space-y-4">
+                                    <h4 className="font-bold text-xs text-blue-800 uppercase border-b pb-1">Presbíteros</h4>
+                                    {availableOfficers.presbiteros.map(u => (
+                                        <div key={u.uid} className="flex items-center justify-between py-2">
+                                            <span className="text-sm">{u.name}</span>
+                                            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={u.canEditGPS || false} onChange={() => handleToggleGPSPermission(u.uid, u.canEditGPS)} /> Editar GPS</label>
+                                        </div>
+                                    ))}
+                                    <h4 className="font-bold text-xs text-blue-800 uppercase border-b pb-1 mt-4">Diáconos</h4>
+                                    {availableOfficers.diaconos.map(u => (
+                                        <div key={u.uid} className="flex items-center justify-between py-2">
+                                            <span className="text-sm">{u.name}</span>
+                                            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={u.canEditGPS || false} onChange={() => handleToggleGPSPermission(u.uid, u.canEditGPS)} /> Editar GPS</label>
+                                        </div>
+                                    ))}
+                                </div>
+                                <Button onClick={()=>setTeamModalOpen(false)} variant="ghost" className="w-full mt-6">Fechar</Button>
+                            </div>
+                        </div>
+                    )}
 
                     {configModalOpen && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
