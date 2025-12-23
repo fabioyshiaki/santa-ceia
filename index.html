@@ -35,7 +35,7 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <!-- Error Handler Global (Crash Total) -->
+    <!-- Error Handler Global -->
     <script>
         function copyText(text) {
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -70,7 +70,7 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "13.4.0 (Maps & Logout Fix)";
+        const APP_VERSION = "13.5.0 (Gestão Avançada)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -411,6 +411,7 @@
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
             const [appError, setAppError] = React.useState(null); // Estado para erros da app
+            const [gpsChoiceTarget, setGpsChoiceTarget] = React.useState(null);
 
             const [visits, setVisits] = React.useState([]);
             const [usersList, setUsersList] = React.useState([]);
@@ -451,7 +452,8 @@
             // --- 5. DERIVED STATE ---
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
+            const canManage = isPastor || userData?.canManage;
+            const canSeeGPS = canManage || userData?.canEditGPS;
 
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
             
@@ -580,7 +582,7 @@
             const handleRegisterProfile = async (e) => {
                 e.preventDefault();
                 const fd = new FormData(e.target);
-                const data = { name: fd.get('name'), role: fd.get('role').toLowerCase(), uid: user.uid, canEditGPS: false };
+                const data = { name: fd.get('name'), role: fd.get('role').toLowerCase(), uid: user.uid, canEditGPS: false, canManage: false };
                 await db.collection('artifacts').doc(APP_ID).collection('users').doc(user.uid).set(data);
                 localStorage.setItem(`profile_${user.uid}`, JSON.stringify(data));
                 setUserData(data);
@@ -588,10 +590,20 @@
             };
 
             const handleToggleGPSPermission = async (targetUid, currentStatus) => {
-                if (!confirm("Alterar permissão de GPS?")) return;
+                // if (!confirm("Alterar permissão de GPS?")) return;
                 await db.collection('artifacts').doc(APP_ID).collection('users').doc(targetUid).update({ canEditGPS: !currentStatus });
                 setUsersList(prev => prev.map(u => u.uid === targetUid ? {...u, canEditGPS: !currentStatus} : u));
                 const newAvailable = {
+                    presbiteros: usersList.filter(u => u.role === 'presbitero' || (u.uid === targetUid && u.role === 'presbitero')),
+                    diaconos: usersList.filter(u => u.role === 'diacono' || (u.uid === targetUid && u.role === 'diacono'))
+                };
+                setAvailableOfficers(newAvailable);
+            };
+
+            const handleToggleManagePermission = async (targetUid, currentStatus) => {
+                await db.collection('artifacts').doc(APP_ID).collection('users').doc(targetUid).update({ canManage: !currentStatus });
+                setUsersList(prev => prev.map(u => u.uid === targetUid ? {...u, canManage: !currentStatus} : u));
+                 const newAvailable = {
                     presbiteros: usersList.filter(u => u.role === 'presbitero' || (u.uid === targetUid && u.role === 'presbitero')),
                     diaconos: usersList.filter(u => u.role === 'diacono' || (u.uid === targetUid && u.role === 'diacono'))
                 };
@@ -625,9 +637,11 @@
                 else alert("Erro ao ler.");
             };
              const updateGPS = async (id) => {
+                 setGpsChoiceTarget(null); // Close modal
                 navigator.geolocation.getCurrentPosition(async p => {
                     await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ lat: p.coords.latitude, lng: p.coords.longitude });
                     refreshData();
+                    alert("Localização atualizada!");
                 }, () => handleError("Erro ao obter GPS. Verifique a permissão."));
             };
             const toggleAttendance = async (id, currentStatus) => { 
@@ -780,7 +794,7 @@
                         </div>
                         <div className="flex gap-2 ml-2">
                             <button onClick={refreshData} className="p-2 bg-blue-100 text-blue-700 rounded-full shadow-sm border-2 border-blue-200"><Icons.CloudDownload /></button>
-                            {isPastor && <button onClick={()=>setTeamModalOpen(true)} className="p-2 bg-indigo-100 text-indigo-700 rounded-full shadow-sm border-2 border-indigo-200 font-bold text-xs flex items-center justify-center">EQP</button>}
+                            {canManage && <button onClick={()=>setTeamModalOpen(true)} className="p-2 bg-indigo-100 text-indigo-700 rounded-full shadow-sm border-2 border-indigo-200 font-bold text-xs flex items-center justify-center">Equipe</button>}
                             {isPastor && <button onClick={()=>setConfigModalOpen(true)} className="p-2 bg-slate-100 rounded-full"><Icons.Settings /></button>}
                             <button onClick={()=>{localStorage.clear(); auth.signOut(); window.location.reload()}} className="p-2 bg-red-50 text-red-500 rounded-full"><Icons.LogOut /></button>
                         </div>
@@ -804,13 +818,14 @@
                                         </select>
                                         <Button onClick={handleSmartDivide} disabled={isOptimizing}>{isOptimizing ? '...' : 'Gerar'}</Button>
                                     </div>
+                                    <p className="text-[10px] text-blue-600 mt-1">* Opções limitadas automaticamente para máx. 23 casas/grupo.</p>
                                 </div>
                                 {optimizedGroups && optimizedGroups.map((g, i) => (
                                     <div key={i} className="bg-white border rounded-xl p-3 shadow-sm">
                                         <div className="flex justify-between items-center mb-2">
                                             <span className="font-bold text-blue-800">Roteiro {i+1} ({g.length})</span>
                                             <div className="flex gap-1">
-                                                <button onClick={() => openMaps(g)} className="text-xs flex items-center gap-1 bg-blue-50 border border-blue-200 px-2 py-1 rounded text-blue-700"><Icons.Navigation size={12}/> Testar</button>
+                                                <button onClick={() => openMaps(g)} className="text-xs flex items-center gap-1 bg-blue-50 border border-blue-200 px-2 py-1 rounded text-blue-700"><Icons.Navigation size={12}/> Abrir no Google Maps</button>
                                                 <button onClick={()=>handleShowInternalMap(g)} className="text-xs bg-white border px-2 py-1 rounded">Mapa</button>
                                             </div>
                                         </div>
@@ -843,16 +858,11 @@
                                         </div>
                                     </div>
                                 )}
-                             </div>
+                            </div>
                         )}
 
                         {(activeTab === 'list' || !isPastor) && (
                             <div className="space-y-4">
-                                <div className="flex justify-between items-center px-1">
-                                    <h2 className="font-bold text-slate-700">{isPastor ? 'Cadastro Geral' : 'Minhas Visitas'}</h2>
-                                    {isPastor && <Button onClick={()=>setModalOpen(true)} className="py-1 px-3 text-sm rounded-full"><Icons.UserPlus /> Novo</Button>}
-                                </div>
-                                
                                 {!isPastor && myVisits.length > 0 && (
                                     <div className="bg-emerald-600 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden mb-4">
                                         <div className="absolute top-0 right-0 opacity-10 translate-x-4 -translate-y-4"><Icons.Navigation size={100}/></div>
@@ -864,18 +874,21 @@
                                         </div>
                                     </div>
                                 )}
-                                
+                                <div className="flex justify-between items-center px-1">
+                                    <h2 className="font-bold text-slate-700">{canManage ? 'Cadastro Geral' : 'Minhas Visitas'}</h2>
+                                    {canManage && <Button onClick={()=>setModalOpen(true)} className="py-1 px-3 text-sm rounded-full"><Icons.UserPlus /> Novo</Button>}
+                                </div>
                                 <div className="grid gap-3">
                                     {myVisits.map((v, i) => (
                                         <div key={v.id} className={`p-4 rounded-xl border shadow-sm ${v.attendedChurch ? 'bg-green-50' : 'bg-white'}`}>
                                             <div className="flex justify-between">
                                                 <h3 className="font-bold">{v.name}</h3>
-                                                {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-red-400"><Icons.Trash2 size={16}/></button>}
+                                                {canManage && <button onClick={()=>deleteVisit(v.id)} className="text-red-400"><Icons.Trash2 size={16}/></button>}
                                             </div>
                                             <p className="text-sm text-slate-500">{v.address}</p>
                                             <div className="flex gap-2 mt-2">
                                                  <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`, '_blank')} className="flex items-center justify-center p-2 bg-blue-50 text-blue-600 rounded-lg"><Icons.Navigation size={18} /></button>
-                                                 {(isPastor || userData.canEditGPS) && <button onClick={()=>handleLinkGPS(v.id)} disabled={isProcessingLink} className="flex-1 py-2 bg-slate-50 rounded text-xs font-medium">Coords</button>}
+                                                 {(canSeeGPS) && <button onClick={()=>setGpsChoiceTarget(v.id)} disabled={isProcessingLink} className="flex-1 py-2 bg-slate-50 rounded text-xs font-medium">Coordenadas/GPS</button>}
                                             </div>
                                             <div className="mt-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={v.attendedChurch} onChange={() => toggleAttendance(v.id, v.attendedChurch)} /> Foi à Santa Ceia?</label></div>
                                         </div>
@@ -884,7 +897,53 @@
                             </div>
                         )}
                     </main>
-                    {/* Modais de Configuração omitidos para brevidade mas a lógica está presente nas funções */}
+
+                    {/* MODAL GESTÃO EQUIPA */}
+                    {teamModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto">
+                                <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Users/> Gestão de Equipa</h3>
+                                <div className="space-y-4">
+                                    <h4 className="font-bold text-xs text-blue-800 uppercase border-b pb-1">Presbíteros</h4>
+                                    {availableOfficers.presbiteros.map(u => (
+                                        <div key={u.uid} className="flex flex-col py-2 border-b last:border-0">
+                                            <span className="text-sm font-bold">{u.name}</span>
+                                            <div className="flex gap-3 mt-1">
+                                                <label className="flex items-center gap-1 text-xs text-slate-600"><input type="checkbox" checked={u.canEditGPS || false} onChange={() => handleToggleGPSPermission(u.uid, u.canEditGPS)} /> Editar GPS</label>
+                                                <label className="flex items-center gap-1 text-xs text-indigo-600 font-bold"><input type="checkbox" checked={u.canManage || false} onChange={() => handleToggleManagePermission(u.uid, u.canManage)} /> Permitir Gestão</label>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <h4 className="font-bold text-xs text-blue-800 uppercase border-b pb-1 mt-4">Diáconos</h4>
+                                    {availableOfficers.diaconos.map(u => (
+                                        <div key={u.uid} className="flex flex-col py-2 border-b last:border-0">
+                                            <span className="text-sm font-bold">{u.name}</span>
+                                            <div className="flex gap-3 mt-1">
+                                                <label className="flex items-center gap-1 text-xs text-slate-600"><input type="checkbox" checked={u.canEditGPS || false} onChange={() => handleToggleGPSPermission(u.uid, u.canEditGPS)} /> Editar GPS</label>
+                                                <label className="flex items-center gap-1 text-xs text-indigo-600 font-bold"><input type="checkbox" checked={u.canManage || false} onChange={() => handleToggleManagePermission(u.uid, u.canManage)} /> Permitir Gestão</label>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <Button onClick={()=>setTeamModalOpen(false)} variant="ghost" className="w-full mt-6">Fechar</Button>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* MODAL ESCOLHA GPS */}
+                    {gpsChoiceTarget && (
+                        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
+                                <h3 className="font-bold mb-4 text-lg">Como quer definir o local?</h3>
+                                <div className="space-y-3">
+                                    <button onClick={() => updateGPS(gpsChoiceTarget)} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2"><Icons.MapPin /> Usar meu GPS Atual</button>
+                                    <button onClick={() => { setGpsChoiceTarget(null); handleLinkGPS(gpsChoiceTarget); }} className="w-full bg-slate-100 text-slate-700 py-3 rounded-xl font-bold flex items-center justify-center gap-2">🔗 Colar Link / Texto</button>
+                                </div>
+                                <button onClick={() => setGpsChoiceTarget(null)} className="mt-4 text-sm text-slate-400 underline">Cancelar</button>
+                            </div>
+                        </div>
+                    )}
+
                     {configModalOpen && (
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
