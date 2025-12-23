@@ -70,7 +70,7 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "15.1.0 (Comma Coords Fix)";
+        const APP_VERSION = "15.2.0 (Balanced Routes)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -134,39 +134,92 @@
             });
         };
 
+        // --- ALGORITMOS DE DISTRIBUIÇÃO BALANCEADA ---
+        const distributeBalanced = (visits, centroids, k) => {
+            const n = visits.length;
+            const baseSize = Math.floor(n / k);
+            const remainder = n % k;
+            
+            // Capacidades exatas para cada grupo (diferença máx de 1)
+            const capacities = Array.from({ length: k }, (_, i) => baseSize + (i < remainder ? 1 : 0));
+            const currentCounts = new Array(k).fill(0);
+            
+            // Calcula distância de todas as visitas para todos os centroides
+            let edges = [];
+            visits.forEach((v, vIdx) => {
+                centroids.forEach((c, cIdx) => {
+                    const d = getDistance(safeFloat(v.lat), safeFloat(v.lng), safeFloat(c.lat), safeFloat(c.lng));
+                    edges.push({ vIdx, cIdx, d });
+                });
+            });
+            
+            // Ordena por distância (menor primeiro) - abordagem Gulosa
+            edges.sort((a, b) => a.d - b.d);
+            
+            const assignedGroups = Array.from({ length: k }, () => []);
+            const assignedVisits = new Set();
+            
+            for (const edge of edges) {
+                // Se a visita já foi atribuída, ignora
+                if (assignedVisits.has(edge.vIdx)) continue;
+                
+                // Se o grupo ainda tem espaço, atribui
+                if (currentCounts[edge.cIdx] < capacities[edge.cIdx]) {
+                    assignedGroups[edge.cIdx].push(visits[edge.vIdx]);
+                    assignedVisits.add(edge.vIdx);
+                    currentCounts[edge.cIdx]++;
+                }
+            }
+            return assignedGroups;
+        };
+
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
+
+            // Tenta 20 sementes diferentes para encontrar os melhores centros
             for (let t = 0; t < 20; t++) {
                 let centroids = [];
                 if (visits.length > 0) {
                     for (let i = 0; i < k; i++) centroids.push(visits[Math.floor(Math.random() * visits.length)]);
                 }
+                
+                // Itera para refinar os centroides (K-Means clássico)
                 for (let iter = 0; iter < 5; iter++) {
-                    const clusters = Array.from({ length: k }, () => []);
+                    const tempClusters = Array.from({ length: k }, () => []);
                     visits.forEach(visit => {
-                        let minDistance = Infinity;
+                        let minDist = Infinity;
                         let clusterIndex = 0;
                         centroids.forEach((c, idx) => {
-                            const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(c.lat), safeFloat(c.lng));
-                            if (dist < minDistance) { minDistance = dist; clusterIndex = idx; }
+                            const d = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(c.lat), safeFloat(c.lng));
+                            if (d < minDist) { minDist = d; clusterIndex = idx; }
                         });
-                        clusters[clusterIndex].push(visit);
+                        tempClusters[clusterIndex].push(visit);
                     });
-                    centroids = clusters.map((cluster, idx) => {
+                    
+                    // Recalcula centroides
+                    centroids = tempClusters.map((cluster, idx) => {
                         if (cluster.length === 0) return centroids[idx]; 
                         const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
                         const sumLng = cluster.reduce((acc, v) => acc + safeFloat(v.lng), 0);
                         return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
                     });
+
+                    // Na última iteração, aplica a Distribuição Balanceada
                     if (iter === 4) {
-                        let totalVariance = 0;
-                        clusters.forEach((cluster, idx) => {
-                            cluster.forEach(v => { totalVariance += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng); });
+                        const balancedGroups = distributeBalanced(visits, centroids, k);
+                        
+                        // Calcula score (quão compactos ficaram os grupos)
+                        let currentScore = 0;
+                        balancedGroups.forEach((group, idx) => {
+                            group.forEach(v => {
+                                currentScore += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng);
+                            });
                         });
-                        if (totalVariance < bestScore) {
-                            bestScore = totalVariance;
-                            bestClusters = clusters; 
+
+                        if (currentScore < bestScore) {
+                            bestScore = currentScore;
+                            bestClusters = balancedGroups;
                         }
                     }
                 }
@@ -176,8 +229,7 @@
 
         const optimizeRoutesFallback = (visits, k) => {
             const validVisits = visits.filter(v => safeFloat(v.lat));
-            const clusters = getBestClusters(validVisits, k);
-            return clusters.map(cluster => cluster);
+            return getBestClusters(validVisits, k);
         };
 
         const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
@@ -185,6 +237,8 @@
             await loadGoogleMapsScript(apiKey);
             const service = new window.google.maps.DirectionsService();
             const validVisits = visits.filter(v => safeFloat(v.lat));
+            
+            // Usa os clusters balanceados calculados acima
             const clusters = getBestClusters(validVisits, k);
 
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
@@ -398,6 +452,7 @@
             return <div className="fixed inset-0 bg-white z-50 flex flex-col"><div className="p-4 border-b flex justify-between"><h3 className="font-bold">Mapa</h3><button onClick={onClose}>✕</button></div><div ref={mapContainerRef} className="flex-1 h-full w-full"></div></div>;
         };
 
+        // --- APP ---
         function App() {
             if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
 
@@ -410,8 +465,6 @@
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
             const [appError, setAppError] = React.useState(null); // Estado para erros da app
-            
-            // MODAL GPS CHOICE
             const [gpsChoiceTarget, setGpsChoiceTarget] = React.useState(null);
             const [manualCoordsInput, setManualCoordsInput] = React.useState('');
             const [processingGPS, setProcessingGPS] = React.useState(false);
@@ -975,10 +1028,7 @@
                                         </div>
                                     </div>
                                 )}
-                                <div className="flex justify-between items-center px-1">
-                                    <h2 className="font-bold text-slate-700">Minhas Visitas</h2>
-                                    {/* Botão Novo removido daqui para focar na execução */}
-                                </div>
+                                
                                 <div className="grid gap-3">
                                     {myVisits.length === 0 && <div className="text-center py-10 text-slate-400">Nenhum registo disponível.</div>}
                                     {myVisits.map((v, i) => (
