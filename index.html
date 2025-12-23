@@ -35,47 +35,34 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <!-- Error Handler Global Avançado -->
+    <!-- Error Handler Global (Crash Total) -->
     <script>
-        // Função de cópia robusta (funciona em http e iframes)
-        function copyTextToClipboard(text) {
-            var textArea = document.createElement("textarea");
-            textArea.value = text;
-            textArea.style.position = "fixed";  // Evitar scroll
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            try {
-                var successful = document.execCommand('copy');
-                var msg = successful ? 'sucesso' : 'falha';
-                alert('Texto copiado com ' + msg + '!');
-            } catch (err) {
-                console.error('Erro ao copiar', err);
-                alert('Erro ao copiar: ' + err);
-            }
-            document.body.removeChild(textArea);
+        function copyText(text) {
+            navigator.clipboard.writeText(text).then(() => alert("Copiado!"), () => {
+                const ta = document.createElement("textarea");
+                ta.value = text; document.body.appendChild(ta); ta.select();
+                document.execCommand("copy"); document.body.removeChild(ta);
+                alert("Copiado!");
+            });
         }
-
         window.onerror = function(message, source, lineno, colno, error) {
             const root = document.getElementById('root');
-            const errorText = `Erro: ${message}\nFonte: ${source}\nLinha: ${lineno}`;
-            
-            // Só mostra se o root não tiver conteúdo ou se já houver um erro
-            if (root) {
-                root.innerHTML = '<div style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
-                                 '<h2 style="font-size:20px; font-weight:bold; margin-bottom:10px;">Erro Detetado</h2>' +
-                                 '<p style="font-size:14px; margin-bottom:20px; background:#fee2e2; padding:10px; border-radius:5px; word-break:break-word;">' + message + '</p>' +
-                                 '<div style="display:flex; gap:10px; justify-content:center;">' +
-                                 '<button onclick="copyTextToClipboard(\'' + errorText.replace(/\n/g, "\\n").replace(/'/g, "\\'") + '\')" style="background:#2563eb; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Copiar Erro</button>' +
-                                 '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; border:none; padding:10px 20px; border-radius:8px; font-weight:bold; cursor:pointer;">Reiniciar</button>' +
-                                 '</div></div>';
+            const errString = `Erro Crítico: ${message}\nLinha: ${lineno}\n${error?.stack || ''}`;
+            if(root && !document.getElementById('crash-screen')) {
+                root.innerHTML += `<div id="crash-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:white;z-index:9999;padding:20px;color:#991b1b;display:flex;flex-direction:column;justify-content:center;text-align:center;">
+                    <h2 style="font-size:24px;font-weight:bold;margin-bottom:10px;">Erro Inesperado</h2>
+                    <p style="background:#fee2e2;padding:15px;border-radius:10px;margin-bottom:20px;font-size:12px;font-family:monospace;word-break:break-word;">${message}</p>
+                    <div style="display:flex;gap:10px;justify-content:center;">
+                        <button onclick="copyText(\`${errString.replace(/`/g, '')}\`)" style="padding:10px 20px;background:#fff;border:2px solid #991b1b;color:#991b1b;border-radius:8px;font-weight:bold;">Copiar Erro</button>
+                        <button onclick="localStorage.clear();location.reload()" style="padding:10px 20px;background:#991b1b;color:white;border:none;border-radius:8px;font-weight:bold;">Reiniciar App</button>
+                    </div>
+                </div>`;
             }
-            return false;
         };
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "13.3.0 (Syntax Fix)";
+        const APP_VERSION = "13.3.1 (Alert Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -280,6 +267,34 @@
                 return this.props.children;
             }
         }
+        
+        // --- MODAL DE ERRO CUSTOMIZADO ---
+        const ErrorModal = ({ message, onClose }) => {
+            if (!message) return null;
+            const copyToClipboard = () => {
+                navigator.clipboard.writeText(message).then(() => alert("Copiado!"), () => {
+                    const ta = document.createElement("textarea"); ta.value = message; document.body.appendChild(ta); ta.select();
+                    document.execCommand('copy'); document.body.removeChild(ta); alert("Copiado!");
+                });
+            };
+            return (
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-sm text-center shadow-2xl">
+                        <div className="mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                            <Icons.Alert size={24} />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">Atenção</h3>
+                        <div className="bg-slate-50 p-3 rounded text-left text-xs font-mono text-red-600 mb-4 max-h-32 overflow-y-auto break-all">
+                            {message}
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={copyToClipboard} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-bold text-sm">Copiar Erro</button>
+                            <button onClick={onClose} className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold text-sm">Fechar</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
 
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
@@ -353,6 +368,7 @@
             return <div className="fixed inset-0 bg-white z-50 flex flex-col"><div className="p-4 border-b flex justify-between"><h3 className="font-bold">Mapa</h3><button onClick={onClose}>✕</button></div><div ref={mapContainerRef} className="flex-1 h-full w-full"></div></div>;
         };
 
+        // --- APP ---
         function App() {
             if (!isConfigured) return <div className="p-10 text-center">Configure as chaves do Firebase.</div>;
 
@@ -364,6 +380,7 @@
             const [email, setEmail] = React.useState('');
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
+            const [appError, setAppError] = React.useState(null); // Estado para erros da app
 
             const [visits, setVisits] = React.useState([]);
             const [usersList, setUsersList] = React.useState([]);
@@ -395,12 +412,34 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // 5. DERIVED STATE - FIXED DUPLICATION
+            // Função Helper para Erros
+            const handleError = (msg) => {
+                console.error(msg);
+                setAppError(msg);
+            };
+
+            // --- 5. DERIVED STATE ---
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
 
-            const myVisits = isPastor ? visits : (userData ? visits.filter(v => v.assignedTo && v.assignedTo.includes(userData.name)) : []);
+            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
+            
+            // CORREÇÃO: useMemo para activeGroups para evitar re-render loops ou undefined
+            const activeGroups = React.useMemo(() => {
+                const groups = {};
+                if (isPastor) {
+                    visits.forEach(v => {
+                        if (v.assignedGroup && v.assignedTo) {
+                            if (!groups[v.assignedGroup]) {
+                                groups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
+                            }
+                            groups[v.assignedGroup].count++;
+                        }
+                    });
+                }
+                return groups;
+            }, [isPastor, visits]);
 
             React.useEffect(() => {
                 const unsub = auth.onAuthStateChanged(async (u) => {
@@ -412,7 +451,6 @@
                             localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
                             setIsAdminMode(false);
-                            // Ensure Super Admin is saved in DB for team selection
                             await db.collection('artifacts').doc(APP_ID).collection('users').doc(u.uid).set(adminProfile); 
                         } else if (savedProfile) {
                             const parsed = JSON.parse(savedProfile);
@@ -445,7 +483,7 @@
                             presbiteros: all.filter(u => u.role && u.role.toLowerCase() === 'presbitero'),
                             diaconos: all.filter(u => u.role && u.role.toLowerCase() === 'diacono')
                         });
-                    }).catch(console.error);
+                    }).catch(err => handleError("Erro ao carregar equipa: " + err.message));
                 }
             }, [teamModalOpen, isAdminMode, user]);
 
@@ -487,12 +525,11 @@
 
                     setLastUpdated(new Date().toLocaleTimeString());
                     
-                    // Salvar cache
                      localStorage.setItem(cacheKey, JSON.stringify({
                         date: today, timestamp: new Date().toLocaleTimeString(), visits: list, church: churchSnap.exists ? churchSnap.data() : null, pastor: pastorSnap.exists ? pastorSnap.data() : null, apiKey: apiSnap.exists ? apiSnap.data().googleMaps : null
                     }));
 
-                } catch (e) { console.error("Erro dados", e); }
+                } catch (e) { handleError("Erro ao baixar dados: " + e.message); }
                 setLoading(false);
             };
 
@@ -521,15 +558,8 @@
                 if (!confirm("Alterar permissão de GPS?")) return;
                 await db.collection('artifacts').doc(APP_ID).collection('users').doc(targetUid).update({ canEditGPS: !currentStatus });
                 setUsersList(prev => prev.map(u => u.uid === targetUid ? {...u, canEditGPS: !currentStatus} : u));
-                // Força atualização da lista principal para atualizar as opções no menu de roteiros
-                const newAvailable = {
-                    presbiteros: usersList.filter(u => u.role === 'presbitero' || (u.uid === targetUid && u.role === 'presbitero')),
-                    diaconos: usersList.filter(u => u.role === 'diacono' || (u.uid === targetUid && u.role === 'diacono'))
-                };
-                setAvailableOfficers(newAvailable);
             };
 
-            const refreshData = () => loadData(true);
             const resolveInputToCoords = async (input) => {
                 const commaMatch = input.match(/(-?\d+,\d+),\s*(-?\d+,\d+)/);
                 if (commaMatch) return { lat: commaMatch[1].replace(',', '.'), lng: commaMatch[2].replace(',', '.') };
@@ -554,36 +584,25 @@
                 const coords = await resolveInputToCoords(input);
                 setIsProcessingLink(false);
                 if (coords) { await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) }); refreshData(); }
-                else alert("Erro ao ler.");
+                else handleError("Não foi possível ler as coordenadas ou link.");
             };
              const updateGPS = async (id) => {
                 navigator.geolocation.getCurrentPosition(async p => {
-                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ lat: p.coords.latitude, lng: p.coords.longitude });
+                    await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: p.coords.latitude, lng: p.coords.longitude });
                     refreshData();
-                }, () => alert("Erro GPS"));
+                }, () => handleError("Erro ao obter GPS. Verifique a permissão."));
             };
-            const toggleAttendance = async (id, currentStatus) => { 
-                const newStatus = !currentStatus; 
-                setVisits(prev => prev.map(v => v.id === id ? {...v, attendedChurch: newStatus} : v)); 
-                await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ attendedChurch: newStatus }); 
-            };
-            const addVisit = async () => { 
-                if(!newName.trim()) return; 
-                await db.collection('artifacts').doc(APP_ID).collection('visits').add({ 
-                    name: newName, address: newAddress, duration: newDuration, 
-                    expiresAt: calculateExpiration(newDuration), attendedChurch: false, 
-                    lat: null, lng: null, assignedTo: null, orderIndex: 999, createdAt: new Date() 
-                }); 
-                setNewName(''); setNewAddress(''); setModalOpen(false); refreshData(); 
-            };
-            const deleteVisit = async (id) => { if(confirm("Remover?")) { await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).delete(); refreshData(); } };
-            const handleRenew = async () => { if (!renewTarget) return; await db.collection('artifacts').doc(APP_ID).collection('visits').doc(renewTarget).update({ duration: renewDuration, expiresAt: calculateExpiration(renewDuration), attendedChurch: false }); setRenewTarget(null); refreshData(); };
+            const toggleAttendance = async (id, currentStatus) => { const newStatus = !currentStatus; setVisits(prev => prev.map(v => v.id === id ? {...v, attendedChurch: newStatus} : v)); await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { attendedChurch: newStatus }); };
+            const addVisit = async () => { if(!newName.trim()) return; await addDoc(collection(db, 'artifacts', appId, 'visits'), { name: newName, address: newAddress, duration: newDuration, expiresAt: calculateExpiration(newDuration), attendedChurch: false, lat: null, lng: null, assignedTo: null, orderIndex: 999, createdAt: new Date() }); setNewName(''); setNewAddress(''); setModalOpen(false); refreshData(); };
+            const deleteVisit = async (id) => { if(confirm("Remover?")) { await deleteDoc(doc(db, 'artifacts', appId, 'visits', id)); refreshData(); } };
+            const handleRenew = async () => { if (!renewTarget) return; await updateDoc(doc(db, 'artifacts', appId, 'visits', renewTarget), { duration: renewDuration, expiresAt: calculateExpiration(renewDuration), attendedChurch: false }); setRenewTarget(null); refreshData(); };
             const handleAssignmentChange = (groupIdx, type, value) => { setTeamAssignments(prev => ({ ...prev, [groupIdx]: { ...prev[groupIdx], [type]: value } })); };
-            const saveConfigFromInput = async (type, input) => { if (!input) return; const coords = await resolveInputToCoords(input); if (coords) { const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; const data = { lat: parseFloat(coords.lat), lng: parseFloat(coords.lng) }; await db.collection('artifacts').doc(APP_ID).collection('settings').doc(collectionName).set(data); if (type === 'church') setChurchLocation(data); else setPastorLocation(data); alert("Salvo!"); } else alert("Inválido."); };
+            const saveConfigFromInput = async (type, input) => { if (!input) return; const coords = await resolveInputToCoords(input); if (coords) { const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; const data = { lat: parseFloat(coords.lat), lng: parseFloat(coords.lng) }; await db.collection('artifacts').doc(APP_ID).collection('settings').doc(collectionName).set(data); if (type === 'church') setChurchLocation(data); else setPastorLocation(data); alert("Salvo!"); } else handleError("Coordenadas inválidas."); };
             const saveApiKey = async () => { await db.collection('artifacts').doc(APP_ID).collection('settings').doc('api_keys').set({ googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); };
-            const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
+            const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return handleError("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
             const handleSmartDivide = async () => { 
                 const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng) && !v.attendedChurch);
+                if (validVisits.length === 0) return handleError("Nenhuma casa disponível para roteiro.");
                 const limit = 23;
                 const minGroupsNeeded = Math.ceil(validVisits.length / limit);
                 let finalSplitCount = splitCount;
@@ -631,16 +650,12 @@
                     alert("✅ Sucesso! Rotas salvas."); 
                     refreshData(); 
                 } catch (e) {
-                    console.error(e);
-                    alert("Erro ao salvar: " + e.message);
+                    handleError("Erro ao salvar: " + e.message);
                 } finally {
                     setLoading(false);
                 }
             };
             const deleteRoute = async (groupId) => { if (!confirm(`Excluir Roteiro?`)) return; const toReset = visits.filter(v => v.assignedGroup === groupId); const batch = db.batch(); toReset.forEach(v => { const ref = db.collection('artifacts').doc(APP_ID).collection('visits').doc(v.id); batch.update(ref, { assignedTo: null, assignedGroup: null, orderIndex: 999, assignmentDate: null }); }); await batch.commit(); refreshData(); };
-            const handleShowInternalMap = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); setMapData(toVisit); setShowMap(true); };
-            const openSingleMap = (lat, lng) => { if (lat && lng) window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`, '_blank'); else alert("Sem GPS"); };
-            const openMaps = (groupVisits) => { const toVisit = groupVisits.filter(v => !v.attendedChurch); const validPoints = toVisit.filter(v => safeFloat(v.lat) && safeFloat(v.lng)); if (validPoints.length === 0) return alert("Sem GPS."); const sorted = [...validPoints].sort((a,b) => (a.orderIndex||0)-(b.orderIndex||0)); const coordsList = []; if (churchLocation) coordsList.push(`${safeFloat(churchLocation.lat)},${safeFloat(churchLocation.lng)}`); sorted.forEach(v => coordsList.push(`${safeFloat(v.lat)},${safeFloat(v.lng)}`)); if (pastorLocation) coordsList.push(`${safeFloat(pastorLocation.lat)},${safeFloat(pastorLocation.lng)}`); window.open(`https://www.google.com/maps/dir/${coordsList.join('/')}`, '_blank'); };
 
             if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">A carregar...</div>;
 
@@ -689,6 +704,7 @@
             return (
                 <div className="pb-24">
                     {showMap && <EmbeddedMap visits={mapData} churchLocation={churchLocation} pastorLocation={pastorLocation} onClose={() => setShowMap(false)} googleApiKey={googleApiKey} />}
+                    {appError && <ErrorModal message={appError} onClose={() => setAppError(null)} />}
                     
                     <header className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex justify-between items-center shadow-sm">
                         <div className="flex-1">
@@ -839,7 +855,6 @@
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <h3 className={`font-bold flex items-center gap-2 ${isChecked ? 'text-green-700 line-through' : (expired ? 'text-red-700' : '')}`}>{v.name} {isChecked && <Icons.CheckCircle size={16} />}</h3>
-                                                            {v.lat && v.lng && <p className="text-[10px] text-slate-400 font-mono mb-1">{safeFloat(v.lat).toFixed(5)}, {safeFloat(v.lng).toFixed(5)}</p>}
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
                                                         {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
