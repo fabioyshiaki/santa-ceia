@@ -9,7 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
 
-    <!-- React (Com Crossorigin para ver erros reais) -->
+    <!-- React -->
     <script crossorigin="anonymous" src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin="anonymous" src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script crossorigin="anonymous" src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -17,7 +17,7 @@
     <!-- Leaflet -->
     <script crossorigin="anonymous" src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- FIREBASE COMPAT (Versão Global com Crossorigin) -->
+    <!-- FIREBASE COMPAT (Universal) -->
     <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
     <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
@@ -35,88 +35,26 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <!-- Error Handler Global Avançado -->
+    <!-- Error Handler -->
     <script>
-        // Função para exibir erro na tela
-        function showCriticalError(msg, details) {
-            const root = document.getElementById('root');
-            const errorText = `Erro: ${msg}\nDetalhes: ${details}\nUserAgent: ${navigator.userAgent}`;
-            
-            // Cria UI de Erro se não existir
-            if (!document.getElementById('error-overlay')) {
-                document.body.innerHTML += `
-                    <div id="error-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:white; z-index:9999; padding:20px; overflow:auto; font-family:sans-serif;">
-                        <h2 style="color:#dc2626; font-size:24px; font-weight:bold; margin-bottom:10px;">Ops! Ocorreu um erro.</h2>
-                        <p style="color:#4b5563; margin-bottom:20px;">O aplicativo encontrou um problema inesperado.</p>
-                        
-                        <div style="background:#f3f4f6; padding:15px; border-radius:8px; border:1px solid #d1d5db; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; margin-bottom:20px; color:#1f2937;">
-                            <strong>Mensagem:</strong> ${msg}<br><br>
-                            <strong>Detalhes:</strong> ${details}
-                        </div>
-
-                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                            <button onclick="copyToClipboard('${errorText.replace(/\n/g, "\\n").replace(/'/g, "\\'")}')" style="background:#2563eb; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1;">
-                                📋 Copiar Erro
-                            </button>
-                            <button onclick="window.location.reload()" style="background:#ef4444; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1;">
-                                🔄 Reiniciar
-                            </button>
-                            <button onclick="localStorage.clear(); window.location.reload()" style="background:#9ca3af; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1;">
-                                🧹 Limpar Dados
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-
-        // Função de cópia robusta
-        window.copyToClipboard = function(text) {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(() => alert('Erro copiado!'), () => fallbackCopy(text));
-            } else {
-                fallbackCopy(text);
-            }
-        };
-
-        function fallbackCopy(text) {
-            var textArea = document.createElement("textarea");
-            textArea.value = text;
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            try {
-                document.execCommand('copy');
-                alert('Erro copiado (modo compatibilidade)!');
-            } catch (err) {
-                alert('Não foi possível copiar. Por favor tire um print.');
-            }
-            document.body.removeChild(textArea);
-        }
-
-        // Captura erros de script normais
         window.onerror = function(message, source, lineno, colno, error) {
-            // Se for "Script error." genérico, tenta dar dica
-            if (message === 'Script error.') {
-                message = "Erro de Script Externo (Possível bloqueio de CORS ou falha de rede)";
+            const root = document.getElementById('root');
+            const errorText = `Erro: ${message}\nLinha: ${lineno}`;
+            if(root && !document.getElementById('error-screen')) {
+                root.innerHTML = '<div id="error-screen" style="padding:20px; color:#b91c1c; font-family:sans-serif; text-align:center; margin-top:50px;">' +
+                                 '<h2>Erro Detetado</h2><p>' + message + '</p>' +
+                                 '<button onclick="navigator.clipboard.writeText(\'' + errorText.replace(/'/g, "") + '\'); alert(\'Copiado!\')" style="background:#eee; padding:10px; margin:5px; border-radius:5px;">Copiar</button>' +
+                                 '<button onclick="localStorage.clear(); location.reload()" style="background:#ef4444; color:white; padding:10px; margin:5px; border-radius:5px;">Reiniciar</button>' +
+                                 '</div>';
             }
-            showCriticalError(message, `Fonte: ${source}\nLinha: ${lineno}:${colno}\nStack: ${error ? error.stack : 'N/A'}`);
-            return true; // Previne log duplo na consola
         };
-
-        // Captura erros de Promessas (Async/Await, Firebase, etc)
-        window.addEventListener('unhandledrejection', function(event) {
-            showCriticalError(event.reason ? event.reason.message : 'Erro Desconhecido', 'Falha numa operação assíncrona (Promise Rejection)');
-        });
     </script>
 
     <script type="text/babel">
-        // --- 1. CONFIGURAÇÃO (GLOBAL) ---
-        const APP_VERSION = "13.1.0 (Detailed Diagnostic)";
+        const APP_VERSION = "13.2.0 (Equipe Fix)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
-        // CONFIGURAÇÃO DO FIREBASE
         const firebaseConfig = {
   apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
   authDomain: "santa-ceia-app.firebaseapp.com",
@@ -126,24 +64,17 @@
   appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
 };
 
-        // INICIALIZAÇÃO SEGURA (COMPAT MODE)
         let auth, db;
         const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
 
         if (isConfigured) {
             try {
-                if (!firebase.apps.length) {
-                    firebase.initializeApp(firebaseConfig);
-                }
+                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
                 auth = firebase.auth();
                 db = firebase.firestore();
-            } catch (e) {
-                // Erro será apanhado pelo handler global acima, mas lançamos aqui para garantir
-                throw new Error("Falha ao inicializar Firebase: " + e.message);
-            }
+            } catch (e) { console.error("Erro Firebase", e); }
         }
 
-        // --- 2. UTILITÁRIOS ---
         const safeFloat = (val) => {
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.'));
@@ -184,7 +115,6 @@
             });
         };
 
-        // --- 3. ALGORITMOS (K-Means & Google) ---
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
@@ -204,7 +134,6 @@
                         });
                         clusters[clusterIndex].push(visit);
                     });
-                    // Recalc centroids
                     centroids = clusters.map((cluster, idx) => {
                         if (cluster.length === 0) return centroids[idx]; 
                         const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
@@ -270,7 +199,6 @@
             return optimizedClusters;
         };
 
-        // --- 4. COMPONENTES VISUAIS ---
         const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false }) => {
             const variants = {
                 primary: "bg-blue-700 text-white hover:bg-blue-800",
@@ -443,16 +371,39 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
+            // --- 5. DERIVED STATE ---
+            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
+
+            const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
+            
+            const activeGroups = {};
+            if (isPastor) {
+                visits.forEach(v => {
+                    if (v.assignedGroup && v.assignedTo) {
+                        if (!activeGroups[v.assignedGroup]) activeGroups[v.assignedGroup] = { id: v.assignedGroup, team: v.assignedTo, count: 0 };
+                        activeGroups[v.assignedGroup].count++;
+                    }
+                });
+            }
+
             React.useEffect(() => {
                 const unsub = auth.onAuthStateChanged(async (u) => {
                     setUser(u);
                     if (u) {
+                        const savedProfile = localStorage.getItem(`profile_${u.uid}`);
                         if (u.email === SUPER_ADMIN_EMAIL) {
                             const adminProfile = { name: 'Fabio (Super Admin)', role: 'presbitero', uid: u.uid };
+                            localStorage.setItem(`profile_${u.uid}`, JSON.stringify(adminProfile));
                             setUserData(adminProfile);
                             setIsAdminMode(false);
-                            // Sincroniza Super Admin no DB para aparecer nas listas
-                            db.collection('artifacts').doc(APP_ID).collection('users').doc(u.uid).set(adminProfile);
+                            // Ensure Super Admin is saved in DB for team selection
+                            await db.collection('artifacts').doc(APP_ID).collection('users').doc(u.uid).set(adminProfile); 
+                        } else if (savedProfile) {
+                            const parsed = JSON.parse(savedProfile);
+                            setUserData(parsed);
+                            setIsAdminMode(parsed.role === 'pastor');
                         } else {
                             db.collection('artifacts').doc(APP_ID).collection('users').doc(u.uid).get().then(doc => {
                                 if (doc.exists) {
@@ -471,22 +422,19 @@
             }, []);
 
             React.useEffect(() => {
-                if (isAdminMode || (user?.email === SUPER_ADMIN_EMAIL)) {
+                // SÓ CARREGA A LISTA DE EQUIPA QUANDO O MODAL ABRE (ECONOMIA)
+                if (teamModalOpen && (isAdminMode || user?.email === SUPER_ADMIN_EMAIL)) {
                     if (!db) return;
-                    const fetchOfficers = async () => {
-                        try {
-                            const snap = await db.collection('artifacts').doc(APP_ID).collection('users').get();
-                            const all = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                            setUsersList(all);
-                            setAvailableOfficers({
-                                presbiteros: all.filter(u => u.role && u.role.toLowerCase() === 'presbitero'),
-                                diaconos: all.filter(u => u.role && u.role.toLowerCase() === 'diacono')
-                            });
-                        } catch (e) { console.error("Erro oficiais", e); }
-                    };
-                    fetchOfficers();
+                    db.collection('artifacts').doc(APP_ID).collection('users').get().then(snap => {
+                        const all = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                        setUsersList(all);
+                        setAvailableOfficers({
+                            presbiteros: all.filter(u => u.role && u.role.toLowerCase() === 'presbitero'),
+                            diaconos: all.filter(u => u.role && u.role.toLowerCase() === 'diacono')
+                        });
+                    }).catch(console.error);
                 }
-            }, [isAdminMode, user]);
+            }, [teamModalOpen, isAdminMode, user]);
 
             const loadData = async (force = false) => {
                 if (!user || !db) return;
@@ -560,6 +508,12 @@
                 if (!confirm("Alterar permissão de GPS?")) return;
                 await db.collection('artifacts').doc(APP_ID).collection('users').doc(targetUid).update({ canEditGPS: !currentStatus });
                 setUsersList(prev => prev.map(u => u.uid === targetUid ? {...u, canEditGPS: !currentStatus} : u));
+                // Força atualização da lista principal para atualizar as opções no menu de roteiros
+                const newAvailable = {
+                    presbiteros: usersList.filter(u => u.role === 'presbitero' || (u.uid === targetUid && u.role === 'presbitero')),
+                    diaconos: usersList.filter(u => u.role === 'diacono' || (u.uid === targetUid && u.role === 'diacono'))
+                };
+                setAvailableOfficers(newAvailable);
             };
 
             const refreshData = () => loadData(true);
@@ -586,10 +540,8 @@
                 setIsProcessingLink(true);
                 const coords = await resolveInputToCoords(input);
                 setIsProcessingLink(false);
-                if (coords) { 
-                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ lat: parseFloat(coords.lat), lng: parseFloat(coords.lng) }); 
-                    refreshData(); 
-                } else alert("Erro ao ler.");
+                if (coords) { await updateDoc(doc(db, 'artifacts', appId, 'visits', id), { lat: safeFloat(coords.lat), lng: safeFloat(coords.lng) }); refreshData(); }
+                else alert("Erro ao ler.");
             };
              const updateGPS = async (id) => {
                 navigator.geolocation.getCurrentPosition(async p => {
@@ -721,9 +673,9 @@
                 </div>
             );
 
-            const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
-            const isPastor = (isSuperAdmin && isAdminMode) || userData.role === 'pastor';
-            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData.role === 'pastor' || userData.canEditGPS;
+            const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+            const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
+            const canSeeGPS = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor' || userData?.canEditGPS;
 
             const myVisits = isPastor ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
             
@@ -890,7 +842,6 @@
                                                     <div className="flex justify-between items-start">
                                                         <div>
                                                             <h3 className={`font-bold flex items-center gap-2 ${isChecked ? 'text-green-700 line-through' : (expired ? 'text-red-700' : '')}`}>{v.name} {isChecked && <Icons.CheckCircle size={16} />}</h3>
-                                                            {v.lat && v.lng && <p className="text-[10px] text-slate-400 font-mono mb-1">{safeFloat(v.lat).toFixed(5)}, {safeFloat(v.lng).toFixed(5)}</p>}
                                                             {expired && !isChecked && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold flex items-center w-max mt-1 mb-1 gap-1"><Icons.Clock size={10}/> VENCIDO</span>}
                                                         </div>
                                                         {isPastor && <button onClick={()=>deleteVisit(v.id)} className="text-slate-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>}
