@@ -70,7 +70,7 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "14.1.0 (GPS Indicators)";
+        const APP_VERSION = "14.1.1 (Clean Team)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -263,139 +263,117 @@
         class ErrorBoundary extends React.Component {
             constructor(props) { super(props); this.state = { hasError: false, error: null }; }
             static getDerivedStateFromError(error) { return { hasError: true, error }; }
-            
-            copyError() {
-                const text = this.state.error?.message + '\n' + (this.state.error?.stack || '');
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(text).then(() => alert("Erro copiado!"), () => this.fallbackCopy(text));
-                } else {
-                    this.fallbackCopy(text);
-                }
-            }
-
-            fallbackCopy(text) {
-                var textArea = document.createElement("textarea");
-                textArea.value = text;
-                document.body.appendChild(textArea);
-                textArea.select();
-                try { document.execCommand('copy'); alert('Erro copiado!'); } catch (err) { alert('Falha ao copiar.'); }
-                document.body.removeChild(textArea);
-            }
-
             render() {
                 if (this.state.hasError) return (
                     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-red-50 text-red-900 text-center">
                         <Icons.Alert />
                         <h1 className="text-xl font-bold mt-4">Algo correu mal</h1>
-                        <p className="text-sm mt-2 mb-6 opacity-80 bg-red-100 p-2 rounded max-w-md overflow-auto">{this.state.error?.message}</p>
-                        <div className="flex gap-2">
-                            <button onClick={() => this.copyError()} className="bg-white border border-red-200 text-red-700 px-6 py-3 rounded-xl font-bold shadow-sm">Copiar Erro</button>
-                            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg">Reiniciar App</button>
-                        </div>
+                        <p className="text-sm mt-2 mb-6 opacity-80">{this.state.error?.message}</p>
+                        <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg">Reiniciar App</button>
                     </div>
                 );
                 return this.props.children;
             }
         }
-        
-        // --- MODAL DE ERRO CUSTOMIZADO ---
-        const ErrorModal = ({ message, onClose }) => {
-            if (!message) return null;
-            const copyToClipboard = () => {
-                navigator.clipboard.writeText(message).then(() => alert("Copiado!"), () => {
-                    const ta = document.createElement("textarea"); ta.value = message; document.body.appendChild(ta); ta.select();
-                    document.execCommand('copy'); document.body.removeChild(ta); alert("Copiado!");
-                });
-            };
-            return (
-                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
-                    <div className="bg-white rounded-xl p-6 w-full max-w-sm text-center shadow-2xl">
-                        <div className="mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                            <Icons.Alert size={24} />
-                        </div>
-                        <h3 className="text-lg font-bold text-slate-800 mb-2">Atenção</h3>
-                        <div className="bg-slate-50 p-3 rounded text-left text-xs font-mono text-red-600 mb-4 max-h-32 overflow-y-auto break-all">
-                            {message}
-                        </div>
-                        <div className="flex gap-2">
-                            <button onClick={copyToClipboard} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-bold text-sm">Copiar Erro</button>
-                            <button onClick={onClose} className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold text-sm">Fechar</button>
-                        </div>
-                    </div>
-                </div>
-            );
+
+        // --- GOOGLE MAPS LOADER ---
+        const loadGoogleMapsScript = (apiKey) => {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.maps) return resolve();
+                if (document.querySelector('#google-maps-script')) return resolve();
+                const script = document.createElement('script');
+                script.id = 'google-maps-script';
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
+                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
+                document.body.appendChild(script);
+            });
         };
 
+        // --- MAPA EMBUTIDO ---
         const EmbeddedMap = ({ visits, churchLocation, pastorLocation, onClose, googleApiKey }) => {
             const mapContainerRef = React.useRef(null);
             const [scriptLoaded, setScriptLoaded] = React.useState(false);
             
             React.useEffect(() => {
                 if (googleApiKey) {
-                    if (window.google && window.google.maps) { setScriptLoaded(true); return; }
-                    const script = document.createElement('script');
-                    script.id = 'google-maps-script';
-                    script.src = `https://maps.googleapis.com/maps/api/js?key=${googleApiKey}&libraries=geometry`;
-                    script.async = true; script.defer = true;
-                    script.onload = () => setScriptLoaded(true);
-                    script.onerror = () => { console.error("Falha ao carregar Google Maps"); setScriptLoaded(true); };
-                    document.body.appendChild(script);
-                } else { setScriptLoaded(true); }
+                    loadGoogleMapsScript(googleApiKey).then(() => setScriptLoaded(true)).catch(console.error);
+                } else {
+                    setScriptLoaded(true);
+                }
             }, [googleApiKey]);
 
             React.useEffect(() => {
                 if (!scriptLoaded || !mapContainerRef.current) return;
                 
-                const center = churchLocation ? [safeFloat(churchLocation.lat), safeFloat(churchLocation.lng)] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
-
                 if (googleApiKey && window.google) {
-                    const map = new window.google.maps.Map(mapContainerRef.current, { center: { lat: center[0], lng: center[1] }, zoom: 13 });
+                    const startLat = churchLocation ? safeFloat(churchLocation.lat) : safeFloat(visits[0]?.lat);
+                    const startLng = churchLocation ? safeFloat(churchLocation.lng) : safeFloat(visits[0]?.lng);
+                    const map = new window.google.maps.Map(mapContainerRef.current, {
+                        center: { lat: startLat, lng: startLng }, zoom: 13, disableDefaultUI: false
+                    });
+
                     const points = [];
                     if (churchLocation) points.push({ pos: churchLocation, title: "Igreja", color: "blue" });
                     visits.forEach((v, i) => { if(v.lat) points.push({ pos: v, title: `${i+1}. ${v.name}`, color: "green" }); });
                     if (pastorLocation) points.push({ pos: pastorLocation, title: "Pastor", color: "red" });
-                    
+
                     if (points.length > 1) {
                          const directionsService = new window.google.maps.DirectionsService();
-                         const directionsRenderer = new window.google.maps.DirectionsRenderer({ map });
+                         const directionsRenderer = new window.google.maps.DirectionsRenderer({ map, suppressMarkers: false });
                          const origin = new window.google.maps.LatLng(safeFloat(points[0].pos.lat), safeFloat(points[0].pos.lng));
                          const destination = new window.google.maps.LatLng(safeFloat(points[points.length-1].pos.lat), safeFloat(points[points.length-1].pos.lng));
-                         const waypoints = points.slice(1, -1).map(p => ({ location: new window.google.maps.LatLng(safeFloat(p.pos.lat), safeFloat(p.pos.lng)), stopover: true }));
+                         const waypoints = points.slice(1, -1).map(p => ({
+                             location: new window.google.maps.LatLng(safeFloat(p.pos.lat), safeFloat(p.pos.lng)),
+                             stopover: true
+                         }));
                          directionsService.route({ origin, destination, waypoints, travelMode: window.google.maps.TravelMode.DRIVING }, (res, status) => { if (status === 'OK') directionsRenderer.setDirections(res); });
                     }
                     return;
                 }
 
                 // LEAFLET FALLBACK
+                const center = churchLocation ? [churchLocation.lat, churchLocation.lng] : [visits[0]?.lat || 0, visits[0]?.lng || 0];
                 const map = L.map(mapContainerRef.current).setView(center, 13);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
-                const createIcon = (color, html) => L.divIcon({ className: 'custom-icon', html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
-                
+
+                const createIcon = (color, html) => L.divIcon({
+                    className: 'custom-icon',
+                    html: `<div style="background-color: ${color}; width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${html}</div>`,
+                    iconSize: [30, 30], iconAnchor: [15, 15]
+                });
+
                 const latlngs = [];
                 if (churchLocation && churchLocation.lat) {
-                     L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') }).addTo(map).bindPopup("<b>Início: Igreja</b>");
-                     latlngs.push([churchLocation.lat, churchLocation.lng]);
+                    L.marker([churchLocation.lat, churchLocation.lng], { icon: createIcon('#2563eb', 'I') }).addTo(map).bindPopup("<b>Início: Igreja</b>");
+                    latlngs.push([churchLocation.lat, churchLocation.lng]);
                 }
-                visits.forEach((v, idx) => { 
-                    if (v.lat && v.lng) { 
-                        L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) }).addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`); 
+                visits.forEach((v, idx) => {
+                    if (v.lat && v.lng) {
+                        L.marker([v.lat, v.lng], { icon: createIcon('#16a34a', idx + 1) }).addTo(map).bindPopup(`<b>${idx+1}. ${v.name}</b>`);
                         latlngs.push([v.lat, v.lng]);
-                    } 
+                    }
                 });
-                if (pastorLocation && pastorLocation.lat) { 
-                    L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') }).addTo(map).bindPopup("<b>Fim</b>"); 
+                if (pastorLocation && pastorLocation.lat) {
+                    L.marker([pastorLocation.lat, pastorLocation.lng], { icon: createIcon('#dc2626', 'F') }).addTo(map).bindPopup("<b>Fim</b>");
                     latlngs.push([pastorLocation.lat, pastorLocation.lng]);
                 }
-
-                if (latlngs.length > 1) { 
-                    L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map); 
-                    map.fitBounds(L.polyline(latlngs).getBounds(), { padding: [50, 50] }); 
+                if (latlngs.length > 1) {
+                    const polyline = L.polyline(latlngs, { color: 'blue', weight: 4, opacity: 0.6, dashArray: '10, 10' }).addTo(map);
+                    map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
                 }
 
                 return () => map.remove();
-            }, [scriptLoaded, visits]);
+            }, [scriptLoaded, visits, churchLocation, pastorLocation, googleApiKey]);
 
-            return <div className="fixed inset-0 bg-white z-50 flex flex-col"><div className="p-4 border-b flex justify-between"><h3 className="font-bold">Mapa</h3><button onClick={onClose}>✕</button></div><div ref={mapContainerRef} className="flex-1 h-full w-full"></div></div>;
+            return (
+                <div className="fixed inset-0 bg-white z-50 flex flex-col">
+                    <div className="bg-white p-4 border-b flex justify-between items-center shadow-sm z-10">
+                        <h3 className="font-bold text-slate-800">Mapa da Rota</h3>
+                        <button onClick={onClose} className="bg-slate-100 p-2 rounded-full text-slate-600">✕</button>
+                    </div>
+                    <div ref={mapContainerRef} className="flex-1 bg-slate-100 h-full w-full"></div>
+                </div>
+            );
         };
 
         // --- APP ---
@@ -505,31 +483,34 @@
                 return () => unsub();
             }, []);
 
-            // Carregamento de Equipa Melhorado (Forçado)
-            const fetchTeam = () => {
-                if (!db) return;
-                setLoading(true);
-                db.collection('artifacts').doc(APP_ID).collection('users').get().then(snap => {
-                    const all = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                    setUsersList(all);
-                    setAvailableOfficers({
-                        presbiteros: all.filter(u => u.role && u.role.toLowerCase() === 'presbitero'),
-                        diaconos: all.filter(u => u.role && u.role.toLowerCase() === 'diacono')
-                    });
-                    setLoading(false);
-                }).catch(err => {
-                    handleError("Erro ao carregar equipa: " + err.message);
-                    setLoading(false);
-                });
-            };
-
             React.useEffect(() => {
-                if (teamModalOpen) fetchTeam();
-            }, [teamModalOpen]);
+                // FORÇA O CARREGAMENTO DA EQUIPE AO ABRIR O MODAL
+                if (teamModalOpen) {
+                    if (!db) return;
+                    db.collection('artifacts').doc(APP_ID).collection('users').get().then(snap => {
+                        const all = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                        setUsersList(all);
+                        setAvailableOfficers({
+                            presbiteros: all.filter(u => u.role && u.role.toLowerCase() === 'presbitero'),
+                            diaconos: all.filter(u => u.role && u.role.toLowerCase() === 'diacono')
+                        });
+                    }).catch(err => handleError("Erro ao carregar equipa: " + err.message));
+                }
+            }, [teamModalOpen]); // Removed extra dependencies
             
             // Carregamento Inicial de Equipa se Admin (Para dropdowns)
             React.useEffect(() => {
-                if (isAdminMode) fetchTeam();
+                if (isAdminMode) {
+                     if (!db) return;
+                     db.collection('artifacts').doc(APP_ID).collection('users').get().then(snap => {
+                        const all = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                        setUsersList(all);
+                        setAvailableOfficers({
+                            presbiteros: all.filter(u => u.role && u.role.toLowerCase() === 'presbitero'),
+                            diaconos: all.filter(u => u.role && u.role.toLowerCase() === 'diacono')
+                        });
+                    });
+                }
             }, [isAdminMode]);
 
             const loadData = async (force = false) => {
@@ -971,7 +952,7 @@
                                                         <label className="flex items-center gap-1 text-xs text-indigo-600 font-bold"><input type="checkbox" checked={u.canManage || false} onChange={() => handleToggleManagePermission(u.uid, u.canManage)} /> Permitir Gestão</label>
                                                     </>
                                                 )}
-                                                {!isSuperAdmin && <span className="text-xs text-gray-400">Sem permissão para alterar</span>}
+                                                {u.canManage && !isSuperAdmin && <span className="text-xs text-indigo-600 font-bold">Gestor</span>}
                                             </div>
                                         </div>
                                     ))}
@@ -986,7 +967,7 @@
                                                         <label className="flex items-center gap-1 text-xs text-indigo-600 font-bold"><input type="checkbox" checked={u.canManage || false} onChange={() => handleToggleManagePermission(u.uid, u.canManage)} /> Permitir Gestão</label>
                                                     </>
                                                 )}
-                                                 {!isSuperAdmin && <span className="text-xs text-gray-400">Sem permissão para alterar</span>}
+                                                 {u.canManage && !isSuperAdmin && <span className="text-xs text-indigo-600 font-bold">Gestor</span>}
                                             </div>
                                         </div>
                                     ))}
