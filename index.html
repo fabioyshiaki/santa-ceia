@@ -73,7 +73,7 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "15.6.0 (Classic Routing)";
+        const APP_VERSION = "16.1.0 (Balanced & Optimized)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -142,34 +142,53 @@
             });
         };
 
-        // --- ALGORITMO CLÁSSICO (K-Means) - VOLTA AO QUE FUNCIONAVA BEM ---
+        // --- ALGORITMO K-MEANS CONSTRAINED (BALANCEADO E OTIMIZADO) ---
         const getBestClusters = (visits, k) => {
             let bestClusters = [];
             let bestScore = Infinity;
-
+            
+            // Tenta várias inicializações para encontrar a melhor distribuição geográfica
             for (let t = 0; t < 20; t++) {
-                // Semente Aleatória
+                // 1. Inicializa centroides aleatórios
                 let centroids = [];
                 if (visits.length > 0) {
                     for (let i = 0; i < k; i++) centroids.push(visits[Math.floor(Math.random() * visits.length)]);
                 }
 
-                // Iterações de Refinamento
+                // 2. Itera para refinar (K-Means)
                 for (let iter = 0; iter < 5; iter++) {
                     const clusters = Array.from({ length: k }, () => []);
+                    const clusterCounts = Array(k).fill(0);
+                    const assigned = new Set();
+                    const n = visits.length;
                     
-                    // Atribui cada visita ao centroide mais próximo (Agrupamento Natural)
-                    visits.forEach(visit => {
-                        let minDistance = Infinity;
-                        let clusterIndex = 0;
-                        centroids.forEach((c, idx) => {
-                            const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(c.lat), safeFloat(c.lng));
-                            if (dist < minDistance) { minDistance = dist; clusterIndex = idx; }
+                    // Capacidade ideal (arredondada para cima para permitir a diferença de 1)
+                    const maxCapacity = Math.ceil(n / k);
+
+                    // Cria lista de todas as distâncias possíveis
+                    let edges = [];
+                    visits.forEach((v, vIdx) => {
+                        centroids.forEach((c, cIdx) => {
+                            const d = getDistance(safeFloat(v.lat), safeFloat(v.lng), safeFloat(c.lat), safeFloat(c.lng));
+                            edges.push({ vIdx, cIdx, d });
                         });
-                        clusters[clusterIndex].push(visit);
                     });
+
+                    // Ordena por proximidade (Greedy)
+                    edges.sort((a, b) => a.d - b.d);
+
+                    // Atribui respeitando o limite de capacidade
+                    for (let edge of edges) {
+                        if (assigned.has(edge.vIdx)) continue;
+                        
+                        if (clusterCounts[edge.cIdx] < maxCapacity) {
+                            clusters[edge.cIdx].push(visits[edge.vIdx]);
+                            clusterCounts[edge.cIdx]++;
+                            assigned.add(edge.vIdx);
+                        }
+                    }
                     
-                    // Recalcula o centroide (média das posições)
+                    // Recalcula centroides baseados nos novos grupos
                     centroids = clusters.map((cluster, idx) => {
                         if (cluster.length === 0) return centroids[idx]; 
                         const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
@@ -177,14 +196,23 @@
                         return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
                     });
 
-                    // Avalia a qualidade (Variância Total)
+                    // Na última iteração, avalia a qualidade
                     if (iter === 4) {
+                        // Verifica se todos foram atribuídos (pode falhar se restrições forem muito rígidas, mas maxCapacity ceil previne)
+                        // Se sobrou alguém não atribuído (bug de borda), força no grupo mais próximo ignorando limite
+                        visits.forEach((v, idx) => {
+                            if (!assigned.has(idx)) {
+                                clusters[0].push(v); // Fallback raro
+                            }
+                        });
+
                         let totalVariance = 0;
                         clusters.forEach((cluster, idx) => {
                             cluster.forEach(v => {
                                 totalVariance += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng);
                             });
                         });
+                        
                         if (totalVariance < bestScore) {
                             bestScore = totalVariance;
                             bestClusters = clusters; 
@@ -206,8 +234,11 @@
             await loadGoogleMapsScript(apiKey);
             const service = new window.google.maps.DirectionsService();
             const validVisits = visits.filter(v => safeFloat(v.lat));
-            const clusters = getBestClusters(validVisits, k); // Usa o K-Means Clássico
+            
+            // 1. Agrupa usando o algoritmo balanceado melhorado
+            const clusters = getBestClusters(validVisits, k);
 
+            // 2. Otimiza a ORDEM dentro de cada grupo usando Google TSP
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
                 if (cluster.length > 23) return cluster; // Limite da API
@@ -222,7 +253,7 @@
                 return new Promise((resolve) => {
                     service.route({
                         origin, destination, waypoints,
-                        optimizeWaypoints: true,
+                        optimizeWaypoints: true, // Garante o caminho mais rápido
                         travelMode: window.google.maps.TravelMode.DRIVING
                     }, (result, status) => {
                         if (status === 'OK') {
@@ -319,6 +350,7 @@
             }
         }
         
+        // --- MODAL DE ERRO CUSTOMIZADO ---
         const ErrorModal = ({ message, onClose }) => {
             if (!message) return null;
             const copyToClipboard = () => {
@@ -469,12 +501,14 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
+            // Função Helper para Erros
             const handleError = (msg) => {
                 console.error(msg);
                 setAppError(msg);
                 setProcessingGPS(false);
             };
 
+            // --- 5. DERIVED STATE ---
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canManage = isPastor || userData?.canManage;
@@ -482,6 +516,7 @@
 
             const myVisits = isPastor || (activeTab === 'admin') ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
             
+            // UseMemo para activeGroups
             const activeGroups = React.useMemo(() => {
                 const groups = {};
                 if (isPastor) {
@@ -529,6 +564,7 @@
                 return () => unsub();
             }, []);
 
+            // Carregamento de Equipa Melhorado (Forçado)
             const fetchTeam = () => {
                 if (!db) return;
                 setLoading(true);
@@ -550,6 +586,7 @@
                 if (teamModalOpen) fetchTeam();
             }, [teamModalOpen]);
             
+            // Carregamento Inicial de Equipa se Admin (Para dropdowns)
             React.useEffect(() => {
                 if (isAdminMode) fetchTeam();
             }, [isAdminMode]);
@@ -663,12 +700,16 @@
                 refreshData();
             };
 
+            // *** PARSE DE COORDENADAS (PT/BR + GOOGLE) ***
             const parseCoordinates = (input) => {
                 input = input.trim();
+                
+                // Formato brasileiro (-6,76..., -35,65...)
                 const brRegex = /^(-?\d+),(\d+)[,\s]+(-?\d+),(\d+)/;
                 let match = input.match(brRegex);
                 if (match) return { lat: parseFloat(`${match[1]}.${match[2]}`), lng: parseFloat(`${match[3]}.${match[4]}`) };
 
+                // Formatos normais
                 match = input.match(/(-?\d+\.\d+)[,\s]+(-?\d+\.\d+)/);
                 if (match) return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
 
@@ -698,15 +739,13 @@
                 }
             };
             
-             const updateGPS = async () => {
-                setProcessingGPS(true);
+             const updateGPS = async (id) => {
+                 setGpsChoiceTarget(null); // Close modal
                 navigator.geolocation.getCurrentPosition(async p => {
-                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(gpsChoiceTarget).update({ lat: p.coords.latitude, lng: p.coords.longitude });
-                    setProcessingGPS(false);
-                    setGpsChoiceTarget(null);
+                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ lat: p.coords.latitude, lng: p.coords.longitude });
                     refreshData();
                     alert("✅ Localização atualizada com sucesso!");
-                }, (err) => handleError("Erro ao obter GPS: " + err.message));
+                }, (err) => handleError("Erro ao obter GPS. Verifique a permissão."));
             };
             const toggleAttendance = async (id, currentStatus) => { 
                 const newStatus = !currentStatus; 
@@ -714,6 +753,7 @@
                 await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ attendedChurch: newStatus }); 
             };
             
+            // --- NOVA LÓGICA UNIFICADA ADD/EDIT ---
             const openAddModal = () => {
                 setEditingId(null);
                 setNewName('');
@@ -734,6 +774,7 @@
                 if(!newName.trim()) return; 
                 
                 if (editingId) {
+                    // Update existing
                     await db.collection('artifacts').doc(APP_ID).collection('visits').doc(editingId).update({
                         name: newName,
                         address: newAddress,
@@ -741,12 +782,14 @@
                         expiresAt: calculateExpiration(newDuration)
                     });
                 } else {
+                    // Add new
                     await db.collection('artifacts').doc(APP_ID).collection('visits').add({ 
                         name: newName, address: newAddress, duration: newDuration, 
                         expiresAt: calculateExpiration(newDuration), attendedChurch: false, 
                         lat: null, lng: null, assignedTo: null, orderIndex: 999, createdAt: new Date() 
                     }); 
                 }
+
                 setNewName(''); setNewAddress(''); setModalOpen(false); refreshData(); 
             };
             
@@ -757,7 +800,7 @@
             const handleAssignmentChange = (groupIdx, type, value) => { setTeamAssignments(prev => ({ ...prev, [groupIdx]: { ...prev[groupIdx], [type]: value } })); };
             const saveConfigFromInput = async (type, input) => { 
                 if (!input) return; 
-                const coords = parseCoordinates(input); 
+                const coords = parseCoordinates(input); // Use new robust parser
                 if (coords) { 
                     const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; 
                     const data = { lat: coords.lat, lng: coords.lng }; 
@@ -768,9 +811,8 @@
             };
             const saveApiKey = async () => { await db.collection('artifacts').doc(APP_ID).collection('settings').doc('api_keys').set({ googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); refreshData(); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
-            
             const handleSmartDivide = async () => { 
-                // FILTER: Valid active visits
+                // FILTER: Only active and valid visits
                 const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng) && !v.attendedChurch && !isSkipped(v));
                 
                 if (validVisits.length === 0) return handleError("Nenhuma casa disponível (todas pausadas ou sem GPS).");
@@ -781,11 +823,11 @@
                 if (finalSplitCount < minGroupsNeeded) {
                     finalSplitCount = minGroupsNeeded;
                     setSplitCount(finalSplitCount);
-                    alert(`Ajustado para ${finalSplitCount} grupos para respeitar limite de 23/grupo.`);
+                    alert(`Ajustado para ${finalSplitCount} grupos para respeitar o limite de 23 paragens do Google Maps.`);
                 }
                 setIsOptimizing(true); 
                 
-                // USA ALGORITMO CLÁSSICO (K-MEANS)
+                // USAR ALGORITMO BALANCEADO (16.1.0)
                 const clusters = await optimizeRoutesGoogle(validVisits, finalSplitCount, churchLocation, pastorLocation, googleApiKey); 
                 
                 setOptimizedGroups(clusters); 
@@ -1059,6 +1101,7 @@
                                             <p className="text-sm text-slate-500">{v.address}</p>
                                             <div className="flex gap-2 mt-2">
                                                  <button onClick={() => openSingleMap(v.lat, v.lng)} className="flex items-center justify-center p-2 bg-blue-50 text-blue-600 rounded-lg"><Icons.Navigation size={18} /> Abrir Mapa</button>
+                                                 {(canSeeGPS) && <button onClick={()=>setGpsChoiceTarget(v.id)} disabled={isProcessingLink} className="flex-1 py-2 bg-slate-50 rounded text-xs font-medium">Coordenadas/GPS</button>}
                                             </div>
                                             <div className="mt-2"><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={v.attendedChurch} onChange={() => toggleAttendance(v.id, v.attendedChurch)} /> Foi à Santa Ceia?</label></div>
                                         </div>
@@ -1086,6 +1129,7 @@
                                                         <label className="flex items-center gap-1 text-xs text-indigo-600 font-bold"><input type="checkbox" checked={u.canManage || false} onChange={() => handleToggleManagePermission(u.uid, u.canManage)} /> Permitir Gestão</label>
                                                     </>
                                                 )}
+                                                {!isSuperAdmin && <span className="text-xs text-gray-400"></span>}
                                             </div>
                                         </div>
                                     ))}
@@ -1169,7 +1213,7 @@
                                     <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Nome" className="w-full p-3 border rounded-lg" />
                                     <textarea value={newAddress} onChange={e=>setNewAddress(e.target.value)} placeholder="Endereço" className="w-full p-3 border rounded-lg h-20" />
                                     <select value={newDuration} onChange={e=>setNewDuration(e.target.value)} className="w-full p-3 border rounded-lg bg-white">
-                                        <option>1 Mês (Temporário)</option><option>2 Meses (Temporário)</option><option>3 Meses (Temporário)</option><option>Permanente</option>
+                                        <option>1 Mês (Temporário)</option><option>Permanente</option>
                                     </select>
                                 </div>
                                 <div className="flex gap-2 mt-4">
