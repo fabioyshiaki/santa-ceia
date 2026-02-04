@@ -73,7 +73,7 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "16.0.0 (Smart Routing)";
+        const APP_VERSION = "15.6.0 (Classic Routing)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -102,6 +102,15 @@
             return parseFloat(String(val).replace(',', '.'));
         };
 
+        const getDistance = (lat1, lon1, lat2, lon2) => {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        };
+
         const calculateExpiration = (durationString) => {
             if (!durationString || durationString.includes('Permanente')) return null;
             const months = parseInt(durationString.split(' ')[0]);
@@ -128,95 +137,92 @@
                 const script = document.createElement('script');
                 script.id = 'google-maps-script';
                 script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
-                script.async = true; script.defer = true;
-                script.onload = resolve; script.onerror = reject;
+                script.async = true; script.defer = true; script.onload = resolve; script.onerror = reject;
                 document.body.appendChild(script);
             });
         };
 
-        // --- NOVO ALGORITMO DE CLUSTERING (VARREDURA ESPACIAL) ---
-        // Resolve o problema de rotas longas mantendo vizinhos juntos
-        const getSpatialClusters = (visits, k, startPoint) => {
-            if (visits.length === 0) return [];
-            
-            // 1. Calcular o centro geográfico de todas as visitas (ou usar a Igreja como centro)
-            let centerLat = 0, centerLng = 0;
-            if (startPoint && startPoint.lat) {
-                centerLat = safeFloat(startPoint.lat);
-                centerLng = safeFloat(startPoint.lng);
-            } else {
-                visits.forEach(v => { centerLat += safeFloat(v.lat); centerLng += safeFloat(v.lng); });
-                centerLat /= visits.length;
-                centerLng /= visits.length;
+        // --- ALGORITMO CLÁSSICO (K-Means) - VOLTA AO QUE FUNCIONAVA BEM ---
+        const getBestClusters = (visits, k) => {
+            let bestClusters = [];
+            let bestScore = Infinity;
+
+            for (let t = 0; t < 20; t++) {
+                // Semente Aleatória
+                let centroids = [];
+                if (visits.length > 0) {
+                    for (let i = 0; i < k; i++) centroids.push(visits[Math.floor(Math.random() * visits.length)]);
+                }
+
+                // Iterações de Refinamento
+                for (let iter = 0; iter < 5; iter++) {
+                    const clusters = Array.from({ length: k }, () => []);
+                    
+                    // Atribui cada visita ao centroide mais próximo (Agrupamento Natural)
+                    visits.forEach(visit => {
+                        let minDistance = Infinity;
+                        let clusterIndex = 0;
+                        centroids.forEach((c, idx) => {
+                            const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(c.lat), safeFloat(c.lng));
+                            if (dist < minDistance) { minDistance = dist; clusterIndex = idx; }
+                        });
+                        clusters[clusterIndex].push(visit);
+                    });
+                    
+                    // Recalcula o centroide (média das posições)
+                    centroids = clusters.map((cluster, idx) => {
+                        if (cluster.length === 0) return centroids[idx]; 
+                        const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
+                        const sumLng = cluster.reduce((acc, v) => acc + safeFloat(v.lng), 0);
+                        return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
+                    });
+
+                    // Avalia a qualidade (Variância Total)
+                    if (iter === 4) {
+                        let totalVariance = 0;
+                        clusters.forEach((cluster, idx) => {
+                            cluster.forEach(v => {
+                                totalVariance += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng);
+                            });
+                        });
+                        if (totalVariance < bestScore) {
+                            bestScore = totalVariance;
+                            bestClusters = clusters; 
+                        }
+                    }
+                }
             }
-
-            // 2. Calcular o ângulo polar de cada ponto em relação ao centro
-            // Isso "fatia" o mapa como uma pizza, garantindo proximidade
-            const visitsWithAngle = visits.map(v => {
-                const dx = safeFloat(v.lng) - centerLng;
-                const dy = safeFloat(v.lat) - centerLat;
-                return { ...v, angle: Math.atan2(dy, dx) };
-            });
-
-            // 3. Ordenar por ângulo
-            visitsWithAngle.sort((a, b) => a.angle - b.angle);
-
-            // 4. Dividir em K grupos equilibrados
-            const clusters = [];
-            const baseSize = Math.floor(visits.length / k);
-            const remainder = visits.length % k;
-            
-            let currentIndex = 0;
-            for (let i = 0; i < k; i++) {
-                // Distribui o resto para os primeiros grupos
-                const size = baseSize + (i < remainder ? 1 : 0);
-                clusters.push(visitsWithAngle.slice(currentIndex, currentIndex + size));
-                currentIndex += size;
-            }
-
-            return clusters;
+            return bestClusters;
         };
 
-        const optimizeRoutesFallback = (visits, k, startPoint) => {
-            return getSpatialClusters(visits, k, startPoint);
+        const optimizeRoutesFallback = (visits, k) => {
+            const validVisits = visits.filter(v => safeFloat(v.lat));
+            const clusters = getBestClusters(validVisits, k);
+            return clusters.map(cluster => cluster);
         };
 
         const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
-            if (!apiKey) return optimizeRoutesFallback(visits, k, startPoint);
+            if (!apiKey) return optimizeRoutesFallback(visits, k);
             await loadGoogleMapsScript(apiKey);
-            
-            // 1. Usa o algoritmo espacial para criar os grupos
-            const clusters = getSpatialClusters(visits, k, startPoint);
             const service = new window.google.maps.DirectionsService();
+            const validVisits = visits.filter(v => safeFloat(v.lat));
+            const clusters = getBestClusters(validVisits, k); // Usa o K-Means Clássico
 
-            // 2. Otimiza a rota DENTRO de cada grupo usando o Google
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
                 if (cluster.length > 23) return cluster; // Limite da API
 
-                const origin = new window.google.maps.LatLng(
-                    safeFloat(startPoint?.lat || cluster[0].lat), 
-                    safeFloat(startPoint?.lng || cluster[0].lng)
-                );
-                
-                // Define destino (Casa do Pastor ou último ponto)
-                const lastPoint = cluster[cluster.length-1];
-                const destination = new window.google.maps.LatLng(
-                    safeFloat(endPoint?.lat || lastPoint.lat), 
-                    safeFloat(endPoint?.lng || lastPoint.lng)
-                );
+                const origin = new window.google.maps.LatLng(safeFloat(startPoint?.lat || cluster[0].lat), safeFloat(startPoint?.lng || cluster[0].lng));
+                const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
                 
                 const waypoints = cluster.map(v => ({
-                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)), 
-                    stopover: true
+                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)), stopover: true
                 }));
 
                 return new Promise((resolve) => {
                     service.route({
-                        origin, 
-                        destination, 
-                        waypoints,
-                        optimizeWaypoints: true, // A MÁGICA ACONTECE AQUI
+                        origin, destination, waypoints,
+                        optimizeWaypoints: true,
                         travelMode: window.google.maps.TravelMode.DRIVING
                     }, (result, status) => {
                         if (status === 'OK') {
@@ -225,7 +231,6 @@
                             sortedCluster.isGoogleOptimized = true;
                             resolve(sortedCluster);
                         } else {
-                            // Se falhar, devolve o cluster original (já organizado espacialmente)
                             resolve(cluster); 
                         }
                     });
@@ -426,8 +431,6 @@
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
             const [appError, setAppError] = React.useState(null); // Estado para erros da app
-            
-            // MODAL GPS CHOICE
             const [gpsChoiceTarget, setGpsChoiceTarget] = React.useState(null);
             const [manualCoordsInput, setManualCoordsInput] = React.useState('');
             const [processingGPS, setProcessingGPS] = React.useState(false);
@@ -450,7 +453,7 @@
             const [newName, setNewName] = React.useState('');
             const [newAddress, setNewAddress] = React.useState('');
             const [newDuration, setNewDuration] = React.useState('1 Mês (Temporário)');
-            const [editingId, setEditingId] = React.useState(null); // ID for editing
+            const [editingId, setEditingId] = React.useState(null); 
 
             const [modalOpen, setModalOpen] = React.useState(false);
             const [configModalOpen, setConfigModalOpen] = React.useState(false);
@@ -466,14 +469,12 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // Função Helper para Erros
             const handleError = (msg) => {
                 console.error(msg);
                 setAppError(msg);
                 setProcessingGPS(false);
             };
 
-            // --- 5. DERIVED STATE ---
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canManage = isPastor || userData?.canManage;
@@ -481,7 +482,6 @@
 
             const myVisits = isPastor || (activeTab === 'admin') ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
             
-            // UseMemo para activeGroups
             const activeGroups = React.useMemo(() => {
                 const groups = {};
                 if (isPastor) {
@@ -529,7 +529,6 @@
                 return () => unsub();
             }, []);
 
-            // Carregamento de Equipa
             const fetchTeam = () => {
                 if (!db) return;
                 setLoading(true);
@@ -664,16 +663,12 @@
                 refreshData();
             };
 
-            // *** PARSE DE COORDENADAS (PT/BR + GOOGLE) ***
             const parseCoordinates = (input) => {
                 input = input.trim();
-                
-                // Formato brasileiro (-6,76..., -35,65...)
                 const brRegex = /^(-?\d+),(\d+)[,\s]+(-?\d+),(\d+)/;
                 let match = input.match(brRegex);
                 if (match) return { lat: parseFloat(`${match[1]}.${match[2]}`), lng: parseFloat(`${match[3]}.${match[4]}`) };
 
-                // Formatos normais
                 match = input.match(/(-?\d+\.\d+)[,\s]+(-?\d+\.\d+)/);
                 if (match) return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
 
@@ -713,14 +708,12 @@
                     alert("✅ Localização atualizada com sucesso!");
                 }, (err) => handleError("Erro ao obter GPS: " + err.message));
             };
-
             const toggleAttendance = async (id, currentStatus) => { 
                 const newStatus = !currentStatus; 
                 setVisits(prev => prev.map(v => v.id === id ? {...v, attendedChurch: newStatus} : v)); 
                 await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ attendedChurch: newStatus }); 
             };
             
-            // --- NOVA LÓGICA UNIFICADA ADD/EDIT ---
             const openAddModal = () => {
                 setEditingId(null);
                 setNewName('');
@@ -764,7 +757,7 @@
             const handleAssignmentChange = (groupIdx, type, value) => { setTeamAssignments(prev => ({ ...prev, [groupIdx]: { ...prev[groupIdx], [type]: value } })); };
             const saveConfigFromInput = async (type, input) => { 
                 if (!input) return; 
-                const coords = parseCoordinates(input); // Use new robust parser
+                const coords = parseCoordinates(input); 
                 if (coords) { 
                     const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; 
                     const data = { lat: coords.lat, lng: coords.lng }; 
@@ -775,7 +768,9 @@
             };
             const saveApiKey = async () => { await db.collection('artifacts').doc(APP_ID).collection('settings').doc('api_keys').set({ googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); refreshData(); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
+            
             const handleSmartDivide = async () => { 
+                // FILTER: Valid active visits
                 const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng) && !v.attendedChurch && !isSkipped(v));
                 
                 if (validVisits.length === 0) return handleError("Nenhuma casa disponível (todas pausadas ou sem GPS).");
@@ -789,10 +784,14 @@
                     alert(`Ajustado para ${finalSplitCount} grupos para respeitar limite de 23/grupo.`);
                 }
                 setIsOptimizing(true); 
+                
+                // USA ALGORITMO CLÁSSICO (K-MEANS)
                 const clusters = await optimizeRoutesGoogle(validVisits, finalSplitCount, churchLocation, pastorLocation, googleApiKey); 
+                
                 setOptimizedGroups(clusters); 
                 setIsOptimizing(false); 
             };
+
             const saveRoutes = async () => { 
                 try {
                     setLoading(true);
@@ -1087,7 +1086,6 @@
                                                         <label className="flex items-center gap-1 text-xs text-indigo-600 font-bold"><input type="checkbox" checked={u.canManage || false} onChange={() => handleToggleManagePermission(u.uid, u.canManage)} /> Permitir Gestão</label>
                                                     </>
                                                 )}
-                                                {!isSuperAdmin && <span className="text-xs text-gray-400"></span>}
                                             </div>
                                         </div>
                                     ))}
@@ -1103,7 +1101,6 @@
                                                         <label className="flex items-center gap-1 text-xs text-indigo-600 font-bold"><input type="checkbox" checked={u.canManage || false} onChange={() => handleToggleManagePermission(u.uid, u.canManage)} /> Permitir Gestão</label>
                                                     </>
                                                 )}
-                                                 {!isSuperAdmin && <span className="text-xs text-gray-400"></span>}
                                             </div>
                                         </div>
                                     ))}
@@ -1172,7 +1169,7 @@
                                     <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Nome" className="w-full p-3 border rounded-lg" />
                                     <textarea value={newAddress} onChange={e=>setNewAddress(e.target.value)} placeholder="Endereço" className="w-full p-3 border rounded-lg h-20" />
                                     <select value={newDuration} onChange={e=>setNewDuration(e.target.value)} className="w-full p-3 border rounded-lg bg-white">
-                                        <option>1 Mês (Temporário)</option><option>Permanente</option>
+                                        <option>1 Mês (Temporário)</option><option>2 Meses (Temporário)</option><option>3 Meses (Temporário)</option><option>Permanente</option>
                                     </select>
                                 </div>
                                 <div className="flex gap-2 mt-4">
