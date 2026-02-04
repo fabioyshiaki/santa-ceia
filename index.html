@@ -73,7 +73,7 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "16.2.0 (Hilbert Routing)";
+        const APP_VERSION = "16.0.0 (Otimização Pura)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
@@ -100,6 +100,15 @@
         const safeFloat = (val) => {
             if (!val) return 0;
             return parseFloat(String(val).replace(',', '.'));
+        };
+
+        const getDistance = (lat1, lon1, lat2, lon2) => {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
         };
 
         const calculateExpiration = (durationString) => {
@@ -133,79 +142,75 @@
             });
         };
 
-        // --- ALGORITMO DE CURVA DE HILBERT (Localidade Espacial) ---
-        // Converte 2D (Lat/Lng) para 1D mantendo a proximidade
-        const hilbertDistance = (x, y) => {
-            let d = 0;
-            let s = 65536; // Resolução da grelha
-            let rx, ry;
-            
-            // Normalizar coordenadas para inteiros positivos
-            x = Math.floor((x + 180) * 100); 
-            y = Math.floor((y + 90) * 100);
+        // --- ALGORITMO K-MEANS PURO (RESTAURADO DA v15.3.0) ---
+        // Este algoritmo foca puramente na proximidade física, criando "nuvens" de visitas.
+        // Ignora o equilíbrio forçado para evitar rotas longas.
+        const getBestClusters = (visits, k) => {
+            let bestClusters = [];
+            let bestScore = Infinity;
 
-            for (s = s / 2; s > 0; s = s / 2) {
-                rx = (x & s) > 0;
-                ry = (y & s) > 0;
-                d += s * s * ((3 * rx) ^ ry);
-                if (ry === 0) {
-                    if (rx === 1) {
-                        x = s - 1 - x;
-                        y = s - 1 - y;
+            // Executa 20 simulações para encontrar o melhor centro
+            for (let t = 0; t < 20; t++) {
+                let centroids = [];
+                if (visits.length > 0) {
+                    for (let i = 0; i < k; i++) centroids.push(visits[Math.floor(Math.random() * visits.length)]);
+                }
+
+                // 5 iterações de refinamento
+                for (let iter = 0; iter < 5; iter++) {
+                    const clusters = Array.from({ length: k }, () => []);
+                    
+                    // Passo 1: Atribuir cada casa ao centro mais próximo (sem limites de capacidade)
+                    visits.forEach(visit => {
+                        let minDistance = Infinity;
+                        let clusterIndex = 0;
+                        centroids.forEach((c, idx) => {
+                            const dist = getDistance(safeFloat(visit.lat), safeFloat(visit.lng), safeFloat(c.lat), safeFloat(c.lng));
+                            if (dist < minDistance) { minDistance = dist; clusterIndex = idx; }
+                        });
+                        clusters[clusterIndex].push(visit);
+                    });
+                    
+                    // Passo 2: Recalcular o centro geográfico do novo grupo
+                    centroids = clusters.map((cluster, idx) => {
+                        if (cluster.length === 0) return centroids[idx]; 
+                        const sumLat = cluster.reduce((acc, v) => acc + safeFloat(v.lat), 0);
+                        const sumLng = cluster.reduce((acc, v) => acc + safeFloat(v.lng), 0);
+                        return { lat: sumLat / cluster.length, lng: sumLng / cluster.length };
+                    });
+
+                    // Passo 3: Avaliar qualidade na última volta
+                    if (iter === 4) {
+                        let totalVariance = 0;
+                        clusters.forEach((cluster, idx) => {
+                            cluster.forEach(v => {
+                                totalVariance += getDistance(safeFloat(v.lat), safeFloat(v.lng), centroids[idx].lat, centroids[idx].lng);
+                            });
+                        });
+                        if (totalVariance < bestScore) {
+                            bestScore = totalVariance;
+                            bestClusters = clusters; 
+                        }
                     }
-                    // Swap x and y
-                    let t = x; x = y; y = t;
                 }
             }
-            return d;
-        };
-
-        // Algoritmo Principal de Divisão
-        const getBalancedHilbertClusters = (visits, k) => {
-            if (visits.length === 0) return [];
-            
-            // 1. Calcular índice Hilbert para cada visita
-            const visitsWithIndex = visits.map(v => ({
-                ...v,
-                hIndex: hilbertDistance(safeFloat(v.lng), safeFloat(v.lat))
-            }));
-            
-            // 2. Ordenar pela curva (cria uma linha "cobra" pela cidade)
-            visitsWithIndex.sort((a, b) => a.hIndex - b.hIndex);
-            
-            // 3. Dividir a cobra em pedaços iguais
-            const n = visitsWithIndex.length;
-            const baseSize = Math.floor(n / k);
-            const remainder = n % k;
-            
-            const clusters = [];
-            let currentIndex = 0;
-            
-            for (let i = 0; i < k; i++) {
-                // Distribui o resto para manter a diferença máxima de 1
-                const size = baseSize + (i < remainder ? 1 : 0);
-                if (size > 0) {
-                    clusters.push(visitsWithIndex.slice(currentIndex, currentIndex + size));
-                    currentIndex += size;
-                }
-            }
-            
-            return clusters;
+            return bestClusters;
         };
 
         const optimizeRoutesFallback = (visits, k) => {
-            return getBalancedHilbertClusters(visits, k);
+            const validVisits = visits.filter(v => safeFloat(v.lat));
+            return getBestClusters(validVisits, k);
         };
 
         const optimizeRoutesGoogle = async (visits, k, startPoint, endPoint, apiKey) => {
             if (!apiKey) return optimizeRoutesFallback(visits, k);
             await loadGoogleMapsScript(apiKey);
             
-            // 1. Divide em zonas usando Hilbert (Garante vizinhança e equilíbrio)
-            const clusters = getBalancedHilbertClusters(visits, k);
+            // 1. Agrupar por proximidade pura (K-Means)
+            const clusters = getBestClusters(visits, k);
             const service = new window.google.maps.DirectionsService();
 
-            // 2. Otimiza a ORDEM dentro de cada zona (Google TSP)
+            // 2. Otimizar a sequência dentro de cada grupo (Traveling Salesman)
             const optimizedClusters = await Promise.all(clusters.map(async (cluster) => {
                 if (cluster.length === 0) return [];
                 if (cluster.length > 23) return cluster; // Limite da API
@@ -214,13 +219,14 @@
                 const destination = new window.google.maps.LatLng(safeFloat(endPoint?.lat || cluster[cluster.length-1].lat), safeFloat(endPoint?.lng || cluster[cluster.length-1].lng));
                 
                 const waypoints = cluster.map(v => ({
-                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)), stopover: true
+                    location: new window.google.maps.LatLng(safeFloat(v.lat), safeFloat(v.lng)), 
+                    stopover: true
                 }));
 
                 return new Promise((resolve) => {
                     service.route({
                         origin, destination, waypoints,
-                        optimizeWaypoints: true, // Google ordena a melhor sequência
+                        optimizeWaypoints: true, // Google AI ordena o melhor caminho
                         travelMode: window.google.maps.TravelMode.DRIVING
                     }, (result, status) => {
                         if (status === 'OK') {
@@ -317,6 +323,7 @@
             }
         }
         
+        // --- MODAL DE ERRO CUSTOMIZADO ---
         const ErrorModal = ({ message, onClose }) => {
             if (!message) return null;
             const copyToClipboard = () => {
@@ -428,7 +435,7 @@
             const [email, setEmail] = React.useState('');
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
-            const [appError, setAppError] = React.useState(null); // Estado para erros da app
+            const [appError, setAppError] = React.useState(null); 
             const [gpsChoiceTarget, setGpsChoiceTarget] = React.useState(null);
             const [manualCoordsInput, setManualCoordsInput] = React.useState('');
             const [processingGPS, setProcessingGPS] = React.useState(false);
@@ -467,14 +474,12 @@
             const [editPastorCoords, setEditPastorCoords] = React.useState('');
             const [editApiKey, setEditApiKey] = React.useState('');
 
-            // Função Helper para Erros
             const handleError = (msg) => {
                 console.error(msg);
                 setAppError(msg);
                 setProcessingGPS(false);
             };
 
-            // --- 5. DERIVED STATE ---
             const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
             const isPastor = (isSuperAdmin && isAdminMode) || userData?.role === 'pastor';
             const canManage = isPastor || userData?.canManage;
@@ -482,7 +487,6 @@
 
             const myVisits = isPastor || (activeTab === 'admin') ? visits : visits.filter(v => v.assignedTo && userData && v.assignedTo.includes(userData.name));
             
-            // UseMemo para activeGroups
             const activeGroups = React.useMemo(() => {
                 const groups = {};
                 if (isPastor) {
@@ -664,16 +668,12 @@
                 refreshData();
             };
 
-            // *** PARSE DE COORDENADAS (PT/BR + GOOGLE) ***
             const parseCoordinates = (input) => {
                 input = input.trim();
-                
-                // Formato brasileiro (-6,76..., -35,65...)
                 const brRegex = /^(-?\d+),(\d+)[,\s]+(-?\d+),(\d+)/;
                 let match = input.match(brRegex);
                 if (match) return { lat: parseFloat(`${match[1]}.${match[2]}`), lng: parseFloat(`${match[3]}.${match[4]}`) };
 
-                // Formatos normais
                 match = input.match(/(-?\d+\.\d+)[,\s]+(-?\d+\.\d+)/);
                 if (match) return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
 
@@ -703,13 +703,15 @@
                 }
             };
             
-             const updateGPS = async (id) => {
-                 setGpsChoiceTarget(null); // Close modal
+             const updateGPS = async () => {
+                setProcessingGPS(true);
                 navigator.geolocation.getCurrentPosition(async p => {
-                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ lat: p.coords.latitude, lng: p.coords.longitude });
+                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(gpsChoiceTarget).update({ lat: p.coords.latitude, lng: p.coords.longitude });
+                    setProcessingGPS(false);
+                    setGpsChoiceTarget(null);
                     refreshData();
                     alert("✅ Localização atualizada com sucesso!");
-                }, (err) => handleError("Erro ao obter GPS. Verifique a permissão."));
+                }, (err) => handleError("Erro ao obter GPS: " + err.message));
             };
             const toggleAttendance = async (id, currentStatus) => { 
                 const newStatus = !currentStatus; 
@@ -717,7 +719,6 @@
                 await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ attendedChurch: newStatus }); 
             };
             
-            // --- NOVA LÓGICA UNIFICADA ADD/EDIT ---
             const openAddModal = () => {
                 setEditingId(null);
                 setNewName('');
@@ -772,27 +773,23 @@
             };
             const saveApiKey = async () => { await db.collection('artifacts').doc(APP_ID).collection('settings').doc('api_keys').set({ googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); refreshData(); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
-            
             const handleSmartDivide = async () => { 
                 // FILTER: Only active and valid visits
                 const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng) && !v.attendedChurch && !isSkipped(v));
                 
                 if (validVisits.length === 0) return handleError("Nenhuma casa disponível (todas pausadas ou sem GPS).");
                 
-                // Força o cálculo de grupos baseado no limite de 23
                 const limit = 23;
                 const minGroupsNeeded = Math.ceil(validVisits.length / limit);
                 let finalSplitCount = splitCount;
-                
                 if (finalSplitCount < minGroupsNeeded) {
                     finalSplitCount = minGroupsNeeded;
                     setSplitCount(finalSplitCount);
-                    alert(`Ajustado automaticamente para ${finalSplitCount} grupos para respeitar o limite de 23 paragens (Google Maps).`);
+                    alert(`Ajustado para ${finalSplitCount} grupos para respeitar o limite de 23 paragens do Google Maps.`);
                 }
-
                 setIsOptimizing(true); 
                 
-                // USA A LÓGICA HILBERT (16.2.0)
+                // USA A LÓGICA CLÁSSICA (K-MEANS) DA V15.3.0
                 const clusters = await optimizeRoutesGoogle(validVisits, finalSplitCount, churchLocation, pastorLocation, googleApiKey); 
                 
                 setOptimizedGroups(clusters); 
@@ -1123,11 +1120,30 @@
                         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
                                 <h3 className="font-bold mb-4 text-lg">Como quer definir o local?</h3>
-                                <div className="space-y-3">
-                                    <button onClick={() => updateGPS(gpsChoiceTarget)} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2"><Icons.MapPin /> Usar meu GPS Atual</button>
-                                    <button onClick={() => { setGpsChoiceTarget(null); handleLinkGPS(gpsChoiceTarget); }} className="w-full bg-slate-100 text-slate-700 py-3 rounded-xl font-bold flex items-center justify-center gap-2">🔗 Colar Link / Texto</button>
-                                </div>
-                                <button onClick={() => setGpsChoiceTarget(null)} className="mt-4 text-sm text-slate-400 underline">Cancelar</button>
+                                
+                                {processingGPS ? (
+                                    <div className="flex flex-col items-center justify-center py-6">
+                                        <div className="spinner mb-2 border-blue-600 border-t-transparent"></div>
+                                        <p className="text-sm text-blue-600 font-bold">A processar...</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <button onClick={() => updateGPS(gpsChoiceTarget)} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2"><Icons.MapPin /> Usar meu GPS Atual</button>
+                                        
+                                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                            <p className="text-xs text-slate-500 mb-2 text-left">Ou cole coordenadas / link do Google Maps:</p>
+                                            <input 
+                                                className="w-full p-2 border rounded text-xs mb-2" 
+                                                placeholder="-23.5505, -46.6333" 
+                                                value={manualCoordsInput}
+                                                onChange={e => setManualCoordsInput(e.target.value)}
+                                            />
+                                            <button onClick={handleManualCoordsSubmit} className="w-full bg-slate-200 text-slate-700 py-2 rounded-lg font-bold text-xs">Salvar Manualmente</button>
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                <button onClick={() => { setGpsChoiceTarget(null); setProcessingGPS(false); }} className="mt-4 text-sm text-slate-400 underline">Cancelar</button>
                             </div>
                         </div>
                     )}
