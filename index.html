@@ -5,20 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Santa Ceia dos Enfermos</title>
     
-    <!-- CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
 
-    <!-- React -->
     <script crossorigin="anonymous" src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin="anonymous" src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script crossorigin="anonymous" src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Leaflet -->
     <script crossorigin="anonymous" src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- FIREBASE COMPAT (Universal) -->
     <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
     <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
@@ -38,7 +34,6 @@
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
-    <!-- Error Handler Global -->
     <script>
         function copyText(text) {
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -73,18 +68,18 @@
     </script>
 
     <script type="text/babel">
-        const APP_VERSION = "16.0.0 (Otimização Pura)";
+        const APP_VERSION = "16.0.1 (Fix Babel/Declarations)";
         const SUPER_ADMIN_EMAIL = "fabioyoshiaki@gmail.com";
         const APP_ID = "santa-ceia-v1"; 
 
         const firebaseConfig = {
-  apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
-  authDomain: "santa-ceia-app.firebaseapp.com",
-  projectId: "santa-ceia-app",
-  storageBucket: "santa-ceia-app.firebasestorage.app",
-  messagingSenderId: "506964180846",
-  appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
-};
+          apiKey: "AIzaSyDedeYCpaHM3EQ8qgUDB8L2BubHF7sxvGA",
+          authDomain: "santa-ceia-app.firebaseapp.com",
+          projectId: "santa-ceia-app",
+          storageBucket: "santa-ceia-app.firebasestorage.app",
+          messagingSenderId: "506964180846",
+          appId: "1:506964180846:web:d7e77388970b8ef1a28b7f"
+        };
 
         let auth, db;
         const isConfigured = firebaseConfig.apiKey !== "SUA_API_KEY";
@@ -435,7 +430,7 @@
             const [email, setEmail] = React.useState('');
             const [password, setPassword] = React.useState('');
             const [isAdminMode, setIsAdminMode] = React.useState(false);
-            const [appError, setAppError] = React.useState(null); 
+            const [appError, setAppError] = React.useState(null); // Estado para erros da app
             const [gpsChoiceTarget, setGpsChoiceTarget] = React.useState(null);
             const [manualCoordsInput, setManualCoordsInput] = React.useState('');
             const [processingGPS, setProcessingGPS] = React.useState(false);
@@ -703,15 +698,13 @@
                 }
             };
             
-             const updateGPS = async () => {
-                setProcessingGPS(true);
+             const updateGPS = async (id) => {
+                 setGpsChoiceTarget(null); // Close modal
                 navigator.geolocation.getCurrentPosition(async p => {
-                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(gpsChoiceTarget).update({ lat: p.coords.latitude, lng: p.coords.longitude });
-                    setProcessingGPS(false);
-                    setGpsChoiceTarget(null);
+                    await db.collection('artifacts').doc(APP_ID).collection('visits').doc(id).update({ lat: p.coords.latitude, lng: p.coords.longitude });
                     refreshData();
                     alert("✅ Localização atualizada com sucesso!");
-                }, (err) => handleError("Erro ao obter GPS: " + err.message));
+                }, (err) => handleError("Erro ao obter GPS. Verifique a permissão."));
             };
             const toggleAttendance = async (id, currentStatus) => { 
                 const newStatus = !currentStatus; 
@@ -762,7 +755,7 @@
             const handleAssignmentChange = (groupIdx, type, value) => { setTeamAssignments(prev => ({ ...prev, [groupIdx]: { ...prev[groupIdx], [type]: value } })); };
             const saveConfigFromInput = async (type, input) => { 
                 if (!input) return; 
-                const coords = parseCoordinates(input); // Use new robust parser
+                const coords = parseCoordinates(input); 
                 if (coords) { 
                     const collectionName = type === 'church' ? 'church_config' : 'pastor_config'; 
                     const data = { lat: coords.lat, lng: coords.lng }; 
@@ -773,8 +766,8 @@
             };
             const saveApiKey = async () => { await db.collection('artifacts').doc(APP_ID).collection('settings').doc('api_keys').set({ googleMaps: editApiKey }); setGoogleApiKey(editApiKey); alert("Chave salva!"); refreshData(); };
             const reoptimizeGroup = async (groupIndex, group) => { if (!googleApiKey) return alert("Precisa da Chave do Google."); if (!confirm("Re-otimizar?")) return; setIsOptimizing(true); const optimizedSingle = await optimizeRoutesGoogle(group, 1, churchLocation, pastorLocation, googleApiKey); const newGroups = [...optimizedGroups]; newGroups[groupIndex] = optimizedSingle[0]; setOptimizedGroups(newGroups); setIsOptimizing(false); alert("Grupo re-ordenado!"); };
+            
             const handleSmartDivide = async () => { 
-                // FILTER: Only active and valid visits
                 const validVisits = visits.filter(v => safeFloat(v.lat) && safeFloat(v.lng) && !v.attendedChurch && !isSkipped(v));
                 
                 if (validVisits.length === 0) return handleError("Nenhuma casa disponível (todas pausadas ou sem GPS).");
@@ -789,7 +782,6 @@
                 }
                 setIsOptimizing(true); 
                 
-                // USA A LÓGICA CLÁSSICA (K-MEANS) DA V15.3.0
                 const clusters = await optimizeRoutesGoogle(validVisits, finalSplitCount, churchLocation, pastorLocation, googleApiKey); 
                 
                 setOptimizedGroups(clusters); 
@@ -1174,7 +1166,7 @@
                                     <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Nome" className="w-full p-3 border rounded-lg" />
                                     <textarea value={newAddress} onChange={e=>setNewAddress(e.target.value)} placeholder="Endereço" className="w-full p-3 border rounded-lg h-20" />
                                     <select value={newDuration} onChange={e=>setNewDuration(e.target.value)} className="w-full p-3 border rounded-lg bg-white">
-                                        <option>1 Mês (Temporário)</option><option>Permanente</option>
+                                        <option>1 Mês (Temporário)</option><option>2 Meses (Temporário)</option><option>3 Meses (Temporário)</option><option>Permanente</option>
                                     </select>
                                 </div>
                                 <div className="flex gap-2 mt-4">
